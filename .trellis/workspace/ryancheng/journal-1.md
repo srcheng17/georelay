@@ -229,3 +229,39 @@ Implemented and verified mainland AMap / overseas OSM sidecar and fixed-release 
 ### Status
 
 [OK] **Completed**
+
+
+## Session 8: 多供应商与公开双架构镜像交付
+<!-- trellis-session: v=2 fp=2d89e8e31251e868 -->
+
+**Date**: 2026-10-03
+**Task**: 多供应商与公开双架构镜像交付
+**Branch**: `feat/amap-adapter`
+
+### Summary
+
+PR #1 已正常合并；main CI 37029960665 两架构及发布成功，两个 GHCR package Public，四个 child digest 匿名拉取与 OCI 回读通过；updater 37030399601 status=current。发布源码 8f4efa1df503d5a25540d9185fb19ddcbd949d32，未生产部署。
+
+### Main Changes
+
+- 高德 REST 官方技能替换与高德/百度/OSM默认策略及请求覆盖已交付。
+
+### Git Commits
+
+| Hash | Message |
+|------|---------|
+| `f8dbc92` | feat: support configurable AMap Baidu and OSM geocoding |
+| `fbd2953` | ci: publish checked multiarch images for stable upstream releases |
+| `1b21b64` | docs: record public multiarch image verification |
+
+### Testing
+
+- [OK] amd64/arm64 CI均通过，空Docker配置下四次真实匿名拉取通过，临时镜像已清理。
+
+### Status
+
+[OK] **Completed**
+
+### Next Steps
+
+- 运行中的TeslaMate服务保持原状；生产升级和历史地址迁移另行安排。

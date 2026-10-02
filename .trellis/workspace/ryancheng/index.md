@@ -8,8 +8,8 @@
 
 <!-- @@@auto:current-status -->
 - **Active File**: `journal-1.md`
-- **Total Sessions**: 7
-- **Last Active**: 2026-10-02
+- **Total Sessions**: 8
+- **Last Active**: 2026-10-03
 <!-- @@@/auto:current-status -->
 
 ---
@@ -19,7 +19,7 @@
 <!-- @@@auto:active-documents -->
 | File | Lines | Status |
 |------|-------|--------|
-| `journal-1.md` | ~231 | Active |
+| `journal-1.md` | ~267 | Active |
 <!-- @@@/auto:active-documents -->
 
 ---
@@ -29,6 +29,7 @@
 <!-- @@@auto:session-history -->
 | # | Date | Title | Commits | Branch |
 |---|------|-------|---------|--------|
+| 8 | 2026-10-03 | 多供应商与公开双架构镜像交付 | `f8dbc92`, `fbd2953`, `1b21b64` | `feat/amap-adapter` |
 | 7 | 2026-10-02 | README stack setup | `ce2586ae82c3e3c17db9ca289bfe5e0ef47e759f` | `feat/amap-adapter` |
 | 6 | 2026-10-02 | README 中英文与版式整理 | `feca63335c8cb1ff31570f90cd10c827aafc6388` | `feat/amap-adapter` |
 | 5 | 2026-10-02 | README 文字与结构优化 | `f8ad02d328fffd989d82b7151748930b26e821b7` | `feat/amap-adapter` |
