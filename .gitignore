@@ -12,3 +12,7 @@ __pycache__/
 node_modules/
 _build/
 deps/
+secrets/
+.upstream/
+release-proposal.json
+*.log

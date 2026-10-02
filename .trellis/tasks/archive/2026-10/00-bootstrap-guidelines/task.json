@@ -1,0 +1,29 @@
+{
+  "id": "00-bootstrap-guidelines",
+  "name": "00-bootstrap-guidelines",
+  "title": "Bootstrap Guidelines",
+  "description": "Fill in project development guidelines for AI agents",
+  "status": "completed",
+  "dev_type": "docs",
+  "scope": null,
+  "package": null,
+  "priority": "P1",
+  "creator": "ryancheng",
+  "assignee": "ryancheng",
+  "createdAt": "2026-10-02",
+  "completedAt": "2026-10-02",
+  "branch": "feat/amap-adapter",
+  "base_branch": "main",
+  "worktree_path": null,
+  "commit": "f09ecd0594b60177fae61b93d8de7c425f5735ce",
+  "pr_url": "https://github.com/srcheng17/teslamate/pull/1",
+  "subtasks": [],
+  "children": [],
+  "parent": null,
+  "relatedFiles": [
+    ".trellis/spec/backend/",
+    ".trellis/spec/frontend/"
+  ],
+  "notes": "First-time setup task created by trellis init (fullstack project)",
+  "meta": {}
+}

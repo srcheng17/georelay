@@ -1,38 +1,16 @@
-# Backend Development Guidelines
+# 后端开发约定
 
-> Best practices for backend development in this project.
+本仓库维护独立 Python 标准库 `adapter/server.py`、`patches/` 中的官方 TeslaMate URL 补丁和 `.github/workflows/` 构建流程，不复制完整上游。实现以当前任务 PRD/design、下列契约和 `tests/` 共同验证。
 
----
+## Pre-Development Checklist
 
-## Overview
+- 阅读 [接口与数据](contracts.md)、[质量与发布](quality-guidelines.md)。
+- 追踪 TeslaMate Geocoder → Finch pool → adapter → AMap/Baidu/OSM → SQLite → TeslaMate Address 的完整流。
+- 不操作生产容器、PostgreSQL、Dockhand，也不提交真实 Key、精确车辆坐标或运行备份。
 
-This directory contains guidelines for backend development. Fill in each file with your project's specific conventions.
+## Quality Check
 
----
-
-## Guidelines Index
-
-| Guide | Description | Status |
-|-------|-------------|--------|
-| [Directory Structure](./directory-structure.md) | Module organization and file layout | To fill |
-| [Database Guidelines](./database-guidelines.md) | ORM patterns, queries, migrations | To fill |
-| [Error Handling](./error-handling.md) | Error types, handling strategies | To fill |
-| [Quality Guidelines](./quality-guidelines.md) | Code standards, forbidden patterns | To fill |
-| [Logging Guidelines](./logging-guidelines.md) | Structured logging, log levels | To fill |
-
----
-
-## How to Fill These Guidelines
-
-For each guideline file:
-
-1. Document your project's **actual conventions** (not ideals)
-2. Include **code examples** from your codebase
-3. List **forbidden patterns** and why
-4. Add **common mistakes** your team has made
-
-The goal is to help AI assistants and new team members understand how YOUR project works.
-
----
-
-**Language**: All documentation should be written in **English**.
+- `python3 -m unittest discover -s tests -v`；Python 标准库，无额外测试依赖。
+- `git diff --check`；对固定上游验证补丁、Elixir 格式和对应 ExUnit 测试。
+- 隔离 Docker 构建和健康检查；GitHub checks 必须核对实际结论。
+- 不把模拟测试说成真实高德验证，不把构建/发布说成生产上线。

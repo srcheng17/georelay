@@ -1,0 +1,204 @@
+diff --git a/elixir/lib/teslamate/http.ex b/elixir/lib/teslamate/http.ex
+index c4e6dd0..1a79b2e 100644
+--- a/elixir/lib/teslamate/http.ex
++++ b/elixir/lib/teslamate/http.ex
+@@ -1,6 +1,23 @@
+ defmodule TeslaMate.HTTP do
+   require Logger
+ 
++  def nominatim_base_url do
++    url = System.get_env("NOMINATIM_BASE_URL", "https://nominatim.openstreetmap.org")
++
++    with {:ok, uri} <- URI.new(url),
++         true <- uri.scheme in ["http", "https"],
++         true <- is_binary(uri.host) and uri.host != "",
++         true <- is_integer(uri.port) and uri.port in 1..65_535,
++         true <- is_nil(uri.userinfo) and uri.path in [nil, "/"],
++         true <- is_nil(uri.query) and is_nil(uri.fragment) do
++      URI.to_string(%{uri | path: nil})
++    else
++      _ ->
++        raise ArgumentError,
++              "NOMINATIM_BASE_URL must be an HTTP(S) origin without credentials, path, query or fragment"
++    end
++  end
++
+   def pools do
+     nominatim_proxy =
+       case build_proxy_opts_from_env("NOMINATIM_PROXY") do
+@@ -13,7 +30,7 @@ defmodule TeslaMate.HTTP do
+       System.get_env("TESLA_API_HOST", "https://owner-api.teslamotors.com") => [
+         size: System.get_env("TESLA_API_POOL_SIZE", "10") |> String.to_integer()
+       ],
+-      "https://nominatim.openstreetmap.org" => [size: 3] ++ nominatim_proxy,
++      nominatim_base_url() => [size: 3] ++ nominatim_proxy,
+       "https://api.github.com" => [size: 1],
+       System.get_env("TESLA_AUTH_HOST", "https://auth.tesla.com") => [
+         protocols: [:http1, :http2],
+diff --git a/elixir/lib/teslamate/locations/geocoder.ex b/elixir/lib/teslamate/locations/geocoder.ex
+index 324d87d..5f308ac 100644
+--- a/elixir/lib/teslamate/locations/geocoder.ex
++++ b/elixir/lib/teslamate/locations/geocoder.ex
+@@ -6,7 +6,7 @@ defmodule TeslaMate.Locations.Geocoder do
+   defp client do
+     Tesla.client(
+       [
+-        {Tesla.Middleware.BaseUrl, "https://nominatim.openstreetmap.org"},
++        {Tesla.Middleware.BaseUrl, TeslaMate.HTTP.nominatim_base_url()},
+         {Tesla.Middleware.Headers, [{"user-agent", "TeslaMate/#{@version}"}]},
+         Tesla.Middleware.JSON,
+         {Tesla.Middleware.Logger, debug: true, level: &log_level/1}
+diff --git a/elixir/test/teslamate/http_test.exs b/elixir/test/teslamate/http_test.exs
+index d78c5d4..843e3a7 100644
+--- a/elixir/test/teslamate/http_test.exs
++++ b/elixir/test/teslamate/http_test.exs
+@@ -1,9 +1,17 @@
+ defmodule TeslaMate.HTTPTest do
+-  use ExUnit.Case, async: true
++  use ExUnit.Case, async: false
+   import ExUnit.CaptureLog
+ 
+   setup do
+-    on_exit(fn -> System.delete_env("NOMINATIM_PROXY") end)
++    for key <- ["NOMINATIM_BASE_URL", "NOMINATIM_PROXY"] do
++      value = System.get_env(key)
++      System.delete_env(key)
++
++      on_exit(fn ->
++        if value, do: System.put_env(key, value), else: System.delete_env(key)
++      end)
++    end
++
+     :ok
+   end
+ 
+@@ -32,4 +40,43 @@ defmodule TeslaMate.HTTPTest do
+     assert log =~ "unsupported scheme"
+     assert log =~ "fallback: no proxy"
+   end
++
++  test "custom origins are normalized and retain the dedicated proxy pool" do
++    System.put_env("NOMINATIM_PROXY", "http://127.0.0.1:7890")
++
++    for origin <- ["http://amap-adapter:8080", "https://adapter.example", "http://[::1]:8080"] do
++      System.put_env("NOMINATIM_BASE_URL", origin <> "/")
++      assert TeslaMate.HTTP.nominatim_base_url() == origin
++      pools = TeslaMate.HTTP.pools()
++
++      assert pools[origin] ==
++               [size: 3, conn_opts: [proxy: {:http, "127.0.0.1", 7890, []}]]
++
++      refute Map.has_key?(pools, "https://nominatim.openstreetmap.org")
++    end
++  end
++
++  test "invalid origins fail closed without reflecting the configured value" do
++    for origin <- [
++          "",
++          "amap-adapter:8080",
++          "ftp://adapter.example",
++          "https:///",
++          "http://user:secret@adapter.example",
++          "http://adapter.example/reverse",
++          "http://adapter.example//",
++          "http://adapter.example?key=secret",
++          "http://adapter.example#fragment",
++          "http://adapter.example:0",
++          "http://adapter.example:65536",
++          "http://adapter.example:invalid",
++          "http://bad host"
++        ] do
++      System.put_env("NOMINATIM_BASE_URL", origin)
++
++      error = assert_raise ArgumentError, fn -> TeslaMate.HTTP.pools() end
++      assert error.message =~ "NOMINATIM_BASE_URL must be an HTTP(S) origin"
++      refute error.message =~ "secret"
++    end
++  end
+ end
+diff --git a/elixir/test/teslamate/locations/geocoder_adapter_test.exs b/elixir/test/teslamate/locations/geocoder_adapter_test.exs
+new file mode 100644
+index 0000000..22791d5
+--- /dev/null
++++ b/elixir/test/teslamate/locations/geocoder_adapter_test.exs
+@@ -0,0 +1,80 @@
++defmodule TeslaMate.Locations.GeocoderAdapterTest do
++  use TeslaMate.DataCase, async: false
++
++  alias TeslaMate.Locations.{Address, Geocoder}
++  import Mock
++
++  setup do
++    previous = System.get_env("NOMINATIM_BASE_URL")
++    System.put_env("NOMINATIM_BASE_URL", "http://amap-adapter:8080/")
++
++    on_exit(fn ->
++      if previous,
++        do: System.put_env("NOMINATIM_BASE_URL", previous),
++        else: System.delete_env("NOMINATIM_BASE_URL")
++    end)
++
++    :ok
++  end
++
++  test "reverse and language refresh preserve a private negative node identity" do
++    raw = %{
++      "osm_id" => -10_001,
++      "osm_type" => "node",
++      "lat" => "39.9",
++      "lon" => "116.4",
++      "display_name" => "Adapter test address",
++      "address" => %{"city" => "Test city"}
++    }
++
++    with_mock Tesla.Adapter.Finch,
++      call: fn env, opts ->
++        assert opts[:name] == TeslaMate.HTTP
++        assert opts[:receive_timeout] == 30_000
++        assert TeslaMate.HTTP.pools()["http://amap-adapter:8080"] == [size: 3]
++
++        body =
++          case env.url do
++            "http://amap-adapter:8080/reverse" ->
++              assert env.query[:lat] == "39.9"
++              assert env.query[:lon] == "116.4"
++              raw
++
++            "http://amap-adapter:8080/lookup" ->
++              assert env.query[:osm_ids] == "N-10001"
++              assert Tesla.get_header(env, "Accept-Language") == "zh-CN"
++              [raw]
++          end
++
++        {:ok, %{env | status: 200, body: body}}
++      end do
++      assert {:ok, attrs} = Geocoder.reverse_lookup("39.9", "116.4")
++      changeset = Address.changeset(%Address{}, attrs)
++      assert changeset.valid?
++      assert {:ok, address} = Repo.insert(changeset)
++      assert Repo.get!(Address, address.id).osm_id == -10_001
++      assert {:ok, [refreshed]} = Geocoder.details([address], "zh-CN")
++      assert refreshed.osm_id == address.osm_id
++      assert refreshed.osm_type == address.osm_type
++      assert refreshed.latitude == "39.9"
++      assert refreshed.longitude == "116.4"
++
++      # Prove the database contract is signed bigint, not only Ecto's :integer cast.
++      assert {:ok, extreme} =
++               %Address{}
++               |> Address.changeset(%{attrs | osm_id: -9_223_372_036_854_775_808})
++               |> Repo.insert()
++
++      assert Repo.get!(Address, extreme.id).osm_id == -9_223_372_036_854_775_808
++    end
++  end
++
++  test "adapter failure remains retryable instead of creating Unknown" do
++    with_mock Tesla.Adapter.Finch,
++      call: fn env, _opts ->
++        {:ok, %{env | status: 502, body: %{"error" => "Upstream request failed"}}}
++      end do
++      assert {:error, "Upstream request failed"} = Geocoder.reverse_lookup("39.9", "116.4")
++    end
++  end
++end

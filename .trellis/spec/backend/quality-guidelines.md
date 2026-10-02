@@ -1,51 +1,23 @@
-# Quality Guidelines
+# 验证与发布
 
-> Code quality standards for backend development.
+使用 Python 标准库实现和 unittest，优先直接函数与 SQLite 约束。非平凡逻辑留下能复现实际失败的测试；mock 使用虚构公共地标坐标，禁止生产数据。覆盖 reverse/lookup 身份闭环、重启、TTL、语言、并发、境外、错误与超时；真实本地 HTTP 测试验证 JSON/status/log 隐私。
 
----
+真实 Key 联调须有用户授权，只读提取所需单个变量，经 stdin 写入独立测试容器的0600 tmpfs文件，不把值放入argv、环境或日志。使用公共地标、独立网络和临时数据卷，无host port；只对测试库过期缓存、只断开测试网络，结束删除资源。保存脱敏断言结果，不提交响应或数据库。高德、百度当前不传语言参数，语言切换只断言身份/坐标与刷新闭环，不能要求英文翻译；health成功不能替代真实provider检查。
 
-## Overview
+用户明确要求真实库核对时，可在 `BEGIN READ ONLY` +有界statement/lock timeout中抽样已结束事件的原始位置及关联地址；原记录仅留内存和隔离临时卷，不输出坐标/地址字符串、不作为fixture、不提交Git。先比较事件坐标与旧address坐标；不同点和不同provider的文字差异不能直接判错，同点地点名退化成道路需单列。省市区/道路、地点名和身份闭环分别验证；查后复读生产对照字段并清理临时资源，不写回或迁移旧身份。
 
-<!--
-Document your project's quality standards here.
+固定 `upstream.json` 中稳定 tag 和解引用 commit，下载到临时/忽略目录；先校验 commit 再 `git apply --check`，任何失败停止。保留上游 LICENSE/NOTICE。GitHub release 检测自动创建仅 pin 变更的上游分支与 PR，并显式触发双架构构建；main push 或受控上游分支 dispatch 通过全部校验后自动发布版本镜像。上游分支必须与 main 相比仅改 upstream.json，并匹配稳定 tag；不自动合并更新 PR。两架构都检查成功才从已测试产物发布索引，保留单名 verify 汇总检查，不得绕过测试。不自动部署、不自动提升 stable、不 force push。
 
-Questions to answer:
-- What patterns are forbidden?
-- What linting rules do you enforce?
-- What are your testing requirements?
-- What code review standards apply?
--->
+改动最少的必要文件，不引入框架/ORM/插件层。构建流程本身要有失败测试。新增测试路径必须与 workflow 和 README 命令一致。
 
-(To be filled by the team)
+统一补丁的空白上下文行必须保留单个空格前缀；`.gitattributes`只对此类文件关闭blank-at-eol检查，实际应用后的上游源码仍由prepare脚本执行git diff --check。
 
----
+公开文档以固定上游 README 为基础，保留来源、官方功能和许可；首页显著保留 TRADEMARK.md 要求的非官方声明，不将上游徽章或发布指标当作本仓库结果。截图链接固定官方 commit，配置与构建细节集中在 `docs/AMAP.md`。修改后检查相对链接、锚点、截图可访问性及配置一致性；公开前覆盖可达 Git 历史、PR、CI 日志和产物的敏感信息审查。文档必须区分已验证、已发布和已部署状态。
 
-## Forbidden Patterns
+README 按使用者需要组织用途、功能和使用入口，验收数字、PR 进度与内部任务记录留在维护材料中。项目介绍不将当前构建版本写成长期定位，具体 tag/commit 链接 `upstream.json`；上游 release 检测、版本更新、CI 构建和镜像发布分别写明触发条件。
 
-<!-- Patterns that should never be used and why -->
+`README.md` 默认英文，`README.zh-CN.md` 提供中文；两版顶部互相链接，功能、配置、来源与发布条件同步更新。中文指南返回中文首页，英文首页链接中文指南时标明语言。排版可参考真实开源项目的导航和截图布局，不复制其品牌或徽章；首页只点名 TeslaMate 本身及本项目服务，不介绍第三方客户端。
 
-(To be filled by the team)
+开始使用提供并入现有 stack 的局部 Compose 配置和对应镜像取得方式，注明保留原有设置；官方镜像的 URL 补丁要求不能省略，未发布镜像不能写成可直接拉取。片段用假基础配置验证 Compose 合并后的原环境、网络和持久卷，不读取或启动生产 stack。
 
----
-
-## Required Patterns
-
-<!-- Patterns that must always be used -->
-
-(To be filled by the team)
-
----
-
-## Testing Requirements
-
-<!-- What level of testing is expected -->
-
-(To be filled by the team)
-
----
-
-## Code Review Checklist
-
-<!-- What reviewers should check -->
-
-(To be filled by the team)
+镜像使用入口以公开 GHCR 镜像与统一版本变量为主；首次发布需要核对 package public 和实际匿名拉取，不能以公有 repo 或 authenticated push 代替证明。每六小时轮询为 GitHub 尽力调度，不承诺实时触发。自动更新分支/PR/dispatch 应可重试恢复，禁止 force push 或覆盖异常来源。

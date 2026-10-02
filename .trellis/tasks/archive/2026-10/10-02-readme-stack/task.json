@@ -1,0 +1,32 @@
+{
+  "id": "readme-stack",
+  "name": "readme-stack",
+  "title": "直观的 stack 接入说明",
+  "description": "继续用户README反馈，用现有Docker镜像构建与局部Compose片段直接说明加入现有TeslaMate stack；保留补丁镜像依赖与持久身份，不部署生产。",
+  "status": "completed",
+  "dev_type": null,
+  "scope": null,
+  "package": null,
+  "priority": "P2",
+  "creator": "ryancheng",
+  "assignee": "ryancheng",
+  "createdAt": "2026-10-02",
+  "completedAt": "2026-10-02",
+  "branch": "feat/amap-adapter",
+  "base_branch": "main",
+  "worktree_path": null,
+  "commit": null,
+  "pr_url": "https://github.com/srcheng17/teslamate/pull/1",
+  "subtasks": [],
+  "children": [],
+  "parent": null,
+  "relatedFiles": [
+    "README.md",
+    "README.zh-CN.md",
+    "docs/AMAP.md"
+  ],
+  "notes": "",
+  "meta": {
+    "followup_of": "10-02-readme-bilingual"
+  }
+}

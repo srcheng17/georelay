@@ -1,0 +1,33 @@
+{
+  "id": "readme-bilingual",
+  "name": "readme-bilingual",
+  "title": "README 中英文与版式整理",
+  "description": "承接README优化反馈，默认英文并提供中文切换，参考高Star自托管项目排版，移除第三方客户端说明；保留官方功能与来源，不改产品或发布部署。",
+  "status": "completed",
+  "dev_type": null,
+  "scope": null,
+  "package": null,
+  "priority": "P2",
+  "creator": "ryancheng",
+  "assignee": "ryancheng",
+  "createdAt": "2026-10-02",
+  "completedAt": "2026-10-02",
+  "branch": "feat/amap-adapter",
+  "base_branch": "main",
+  "worktree_path": null,
+  "commit": null,
+  "pr_url": "https://github.com/srcheng17/teslamate/pull/1",
+  "subtasks": [],
+  "children": [],
+  "parent": null,
+  "relatedFiles": [
+    "README.md",
+    "README.zh-CN.md",
+    "docs/AMAP.md",
+    ".trellis/spec/backend/quality-guidelines.md"
+  ],
+  "notes": "",
+  "meta": {
+    "followup_of": "10-02-readme-humanizer"
+  }
+}

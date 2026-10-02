@@ -1,0 +1,31 @@
+{
+  "id": "public-readme",
+  "name": "public-readme",
+  "title": "公开仓库与 README 整理",
+  "description": "用户授权公开现有仓库、落实main分支保护，并在官方README基础上专业呈现高德新增能力；保留当前feature分支，不合并或部署。",
+  "status": "completed",
+  "dev_type": null,
+  "scope": null,
+  "package": null,
+  "priority": "P2",
+  "creator": "ryancheng",
+  "assignee": "ryancheng",
+  "createdAt": "2026-10-02",
+  "completedAt": "2026-10-02",
+  "branch": "feat/amap-adapter",
+  "base_branch": "main",
+  "worktree_path": null,
+  "commit": null,
+  "pr_url": "https://github.com/srcheng17/teslamate/pull/1",
+  "subtasks": [],
+  "children": [],
+  "parent": null,
+  "relatedFiles": [
+    "README.md",
+    "docs/AMAP.md",
+    "MODIFICATIONS.md",
+    ".trellis/spec/backend/quality-guidelines.md"
+  ],
+  "notes": "",
+  "meta": {}
+}
