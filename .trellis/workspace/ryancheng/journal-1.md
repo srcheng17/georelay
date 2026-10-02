@@ -452,3 +452,38 @@ Preserved fixed georelay/georelay-adapter package names across source repository
 ### Status
 
 [OK] **Completed**
+
+
+## Session 15: Reduce upstream branding coupling
+<!-- trellis-session: v=2 fp=74d1d71a4293f27b -->
+
+**Date**: 2026-10-03
+**Task**: Reduce upstream branding coupling
+**Branch**: `enhanced-hedgehog`
+
+### Summary
+
+Reduced brand patch production footprint from 27 files to 7; preserved internal TeslaMate identifiers, legal review and scoped public branding. Completed Python, ExUnit and native ARM64 validation.
+
+### Main Changes
+
+- Replaced 20 gettext diff sections with four semantic message conversions and narrowed static/source guards.
+- Synced scoped preparation contracts and documented Unicode physical-line handling.
+
+### Git Commits
+
+| Hash | Message |
+|------|---------|
+| `92ef245` | build: reduce upstream branding coupling |
+
+### Testing
+
+- [OK] 91 Python tests, 176 ExUnit tests, 20 catalogs/80 legacy-equivalent messages, native ARM64 images and isolated adapter health passed.
+
+### Status
+
+[OK] **Completed**
+
+### Next Steps
+
+- Review enhanced-hedgehog; cloud amd64/arm64 CI awaits a future push or PR. Separate main-image startup task remains on its agent branch.

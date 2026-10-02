@@ -8,7 +8,7 @@
 
 <!-- @@@auto:current-status -->
 - **Active File**: `journal-1.md`
-- **Total Sessions**: 14
+- **Total Sessions**: 15
 - **Last Active**: 2026-10-03
 <!-- @@@/auto:current-status -->
 
@@ -19,7 +19,7 @@
 <!-- @@@auto:active-documents -->
 | File | Lines | Status |
 |------|-------|--------|
-| `journal-1.md` | ~454 | Active |
+| `journal-1.md` | ~489 | Active |
 <!-- @@@/auto:active-documents -->
 
 ---
@@ -29,6 +29,7 @@
 <!-- @@@auto:session-history -->
 | # | Date | Title | Commits | Branch |
 |---|------|-------|---------|--------|
+| 15 | 2026-10-03 | Reduce upstream branding coupling | `92ef245` | `enhanced-hedgehog` |
 | 14 | 2026-10-03 | GeoRelay neutral images and verified Dockhand switch | `6c024b3` | `feat/georelay-image-names` |
 | 13 | 2026-10-03 | Verify image lifecycle PR integration | `8296b19`, `714330c` | `feat/image-lifecycle` |
 | 12 | 2026-10-03 | Verify GeoRelay image lifecycle integration | `98e83d80602f98dcaa820d894fce0f063a79e63b` | `feat/image-lifecycle` |
