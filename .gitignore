@@ -1,0 +1,14 @@
+.DS_Store
+.env
+.env.*
+!.env.example
+*.pem
+*.key
+*.sqlite*
+*.db
+*.dump
+__pycache__/
+*.pyc
+node_modules/
+_build/
+deps/
