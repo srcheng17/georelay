@@ -173,6 +173,22 @@ class RetentionTests(unittest.TestCase):
         package_events = [event[1] for event in fixture.events if "/packages/container/" in event[1]]
         self.assertEqual({path.split("/")[4] for path in package_events}, set(PACKAGES))
 
+    def test_beta_tags_and_aliases_do_not_compete_with_ten_stable_groups(self):
+        fixture = PackageFixture(13)
+        beta = group(0).replace("-georelay-", "-georelay-beta-")
+        protected = {package: set() for package in PACKAGES}
+        for package in PACKAGES:
+            for suffix in ("", "-amd64", "-arm64"):
+                row = fixture.tagged(package, group(0) + suffix)
+                row["metadata"]["container"]["tags"] = [beta + suffix] + (["beta-pr-42"] if not suffix else [])
+                protected[package].add(row["name"])
+        report = fixture.run(apply=True)
+        self.assertEqual(report["complete_releases"], 12)
+        self.assertEqual(report["candidate_releases"], [group(1), group(2)])
+        for package in PACKAGES:
+            removed = {row["digest"] for row in report["packages"][package]["delete"]}
+            self.assertTrue(protected[package].isdisjoint(removed))
+
     def test_default_preview_paginates_and_keeps_ten_by_creation_date(self):
         fixture = PackageFixture(40)
         for package in PACKAGES:

@@ -107,10 +107,15 @@ class ChangesTests(unittest.TestCase):
             with patch.object(ci_changes, "images_required", wraps=lambda name, data, sha: detect(name, data, sha, self.root)):
                 ci_changes.main()
         self.assertEqual(output.read_text(), "image_required=false\n")
+        # A PR event SHA can be a temporary merge; bind the diff to tested head.
+        with patch.dict(os.environ, {**env, "GITHUB_SHA": "f" * 40, "TESTED_SHA": head}), patch.object(sys, "stdout", new_callable=io.StringIO):
+            with patch.object(ci_changes, "images_required", wraps=lambda name, data, sha: detect(name, data, sha, self.root)):
+                ci_changes.main()
+        self.assertEqual(output.read_text(), "image_required=false\nimage_required=false\n")
         event.write_text("invalid json")
         with patch.dict(os.environ, env), patch.object(sys, "stdout", new_callable=io.StringIO):
             ci_changes.main()
-        self.assertEqual(output.read_text(), "image_required=false\nimage_required=true\n")
+        self.assertEqual(output.read_text(), "image_required=false\nimage_required=false\nimage_required=true\n")
 
     def test_actual_verify_shell_accepts_only_successful_selected_validation(self):
         workflow = (ROOT / ".github/workflows/ci.yml").read_text()

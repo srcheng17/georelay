@@ -1,0 +1,28 @@
+{
+  "id": "beta-review-release",
+  "name": "beta-review-release",
+  "title": "Beta 镜像测试、条件自动合并与失败 Bark 通知",
+  "description": "可信 beta 双架构测试/发布成功且 PR head/base 有效时条件合并并发布 main GHCR 镜像；失败 Bark，不更新运行容器",
+  "status": "in_progress",
+  "dev_type": "backend",
+  "scope": "release-pipeline",
+  "package": null,
+  "priority": "P2",
+  "creator": "ryancheng",
+  "assignee": "ryancheng",
+  "createdAt": "2026-10-03",
+  "completedAt": null,
+  "branch": "feat/beta-review-release",
+  "base_branch": "main",
+  "worktree_path": null,
+  "commit": "27d7ebf",
+  "pr_url": null,
+  "subtasks": [],
+  "children": [
+    "10-03-main-image-smoke"
+  ],
+  "parent": null,
+  "relatedFiles": [],
+  "notes": "2026-10-03 用户开始批准实施，范围仅GHCR。本地实现完成，完整131/131、实际arm64主应用105迁移/login/legal/compiled address及故障/取消清理、adapter34/34通过，Trellis全域审查通过。用户已回复行确认3.4计划，本次执行单个本地提交；云端双架构/Actions token保护merge dispatch/真实Bark待验收，BARK_URL缺失。未push/创建PR或外部写入，bootstrap需用户明确审阅合并。 用户最新明确授权“合并，验证”；已整合main c8a6e83地址-only改动，当前执行本次PR云端双架构+beta检查通过后合并与main正式GHCR/latest验证；不更新运行容器。",
+  "meta": {}
+}

@@ -144,6 +144,7 @@ python3 scripts/prepare_upstream.py /tmp/georelay-build
 bash scripts/test_upstream.sh /tmp/georelay-build
 docker build -t georelay:local /tmp/georelay-build
 docker build -t georelay-adapter:local adapter
+bash scripts/test_main_image.sh georelay:local georelay-adapter:local
 ```
 
 `prepare_upstream.py` 的目标目录必须不存在或为空。脚本核实 tag 解引用后的 commit，再严格应用两个地址补丁并检查空白；任何一步失败立即停止。
@@ -151,6 +152,8 @@ docker build -t georelay-adapter:local adapter
 准备只修改地址集成需要的 HTTP、Locations 和 Geocoder 生产源码及对应测试。上游页面、名称、翻译、图标、法律文件和 Dockerfile 保持原样；这些内容变化或缺失不会触发本项目的额外审核门禁。应用仍显示 TeslaMate，仓库与镜像名为 GeoRelay。
 
 上游检查脚本创建独立 Elixir/PostgreSQL 容器、随机网络和临时存储，无 host port，退出时清理。它执行官方编译、格式检查、原 Geocoder/HTTP 测试，以及新增 URL 配置和负数 signed bigint 数据库兼容测试。
+
+`test_main_image.sh` 保留主镜像默认入口和启动命令，在独立 internal 网络连接全新临时 PostgreSQL，验证真实迁移及登录页面 HTTP 就绪。探测使用 adapter 镜像里的 Python，不映射 host port；成功、失败和超时均清理测试资源。CI 的两个原生架构在保存待发布镜像前执行此检查，失败阻止发布。
 
 上述命令验证当前源码的模拟接口、身份持久化、批量预算和上游数据库刷新契约。实际构建和发布结果见仓库的 [Actions](https://github.com/srcheng17/georelay/actions)，核对运行对应的源码 commit。自动测试无需真实地图凭据，不能证明个人 Key 的权限、配额或生产迁移可行性。
 
@@ -179,51 +182,62 @@ sidecar 的缓存 TTL 不会自动更新 PostgreSQL 里的已有地址。应用�
 
 ## 版本跟进与发布
 
-发布镜像与更新正在运行的服务分开进行。
+自动流程只发布 GHCR 镜像，不更新运行容器。
 
-1. [Check upstream release](../.github/workflows/upstream-release.yml) 每六小时检查官方稳定 release，也可在 `main` 手动触发。GitHub 定时任务可能延迟，不保证官方发布后立即执行。
-2. 检测到新版本后，自动创建 `upstream/<tag>` 分支，仅修改 `upstream.json`，并打开更新 PR。tag 解引用到完整 commit；草稿、预发布、降级或移动 tag 会停止处理。
-3. 显式触发 [Validate and build](../.github/workflows/ci.yml)。原生 amd64 和 arm64 runner 分别验证 Python、固定源码、严格地址补丁、地址相关 ExUnit、镜像架构及非 root/适配器健康检查。准备和测试不改写或比对上游 UI、翻译、图标与法律文本，也不追加上游 Dockerfile 指令；应用保持 TeslaMate 名称，仓库和镜像保持 GeoRelay 名称。官方 Dockerfile 自身的输入与构建兼容性由正常镜像构建验证。任一失败都会阻止发布，更新 PR 保留供维护者修复，不自动合并。
-4. 检查全部通过后，从两份已测试镜像产物发布架构标签和多架构版本索引，不重新构建。`main` 上影响镜像的 push 也会自动发布；仍可在 `main` 手动运行并勾选 `publish`。
-5. 两个版本索引都发布并验证后，更新两个 `latest` 并回读核对。发布任务串行执行，过期的官方版本或源码任务不能覆盖 `latest`。两个 package 无法原子更新；任何更新或回读失败都会让工作流失败，此时两个 `latest` 可能暂时不一致，应使用已发布的相同固定版本。
+1. [Check upstream release](../.github/workflows/upstream-release.yml) 每六小时检查官方稳定 release，也可在 main 手动触发。GitHub 定时调度可能延迟。
+2. 新版本创建 upstream/tag 分支与 PR，只修改 upstream.json。草稿、预发布、降级或移动 tag 停止处理；共享 prepare 只应用严格地址补丁；不重写或比对上游 UI、翻译、图标与法律文本，不追加 Dockerfile 指令。
+3. [Validate and build](../.github/workflows/ci.yml) 检出实际 PR head commit，原生 amd64/arm64 分别运行源码检查、共享 prepare/地址 ExUnit、镜像架构/用户与 adapter 许可检查，以及最终镜像内 adapter suite 和应用启动/迁移/地址闭环。应用保留上游 TeslaMate 界面，HTTP 就绪以实际登录表单为准。无需账号或真实地图 Key，使用独立临时资源。
+4. 两架构通过后，复用相同已测试产物发布两个 package 的 beta 版本并验证索引；当前 PR 可更新 beta-pr-N，不能改写 latest。
+5. [Beta release control](../.github/workflows/beta-control.yml) 从可信 main 读取 run、PR 与 registry 元数据。两架构/verify/beta 索引成功，PR 同仓且 open/non-draft、head 仍为 tested SHA、main 基线有效且服务器保护允许时，带 expected head SHA 普通 merge。fork、过期或被新提交替代的成功候选只跳过；控制器不执行候选脚本、不自动重写分支、不合并自身首次启用 PR。
+6. 合并回读成功后显式 dispatch main，绑定 expected_main_sha 与 source_pr；GITHUB_TOKEN 合并的 push 本身不会触发新 CI。main 对 merge commit 重新构建/测试，发布正式版本与 latest；推广前回读 current main。main 的镜像相关 push 或 main publish dispatch 也可正式发布，latest 跟随已审阅 main pin，无需等待尚未合入的新官方版本。
 
-两个公开镜像使用中性包名 `georelay` 与 `georelay-adapter`，不会随源码仓库重命名而改变；只随发布 owner 使用对应命名空间。它们使用同一版本，标签格式为 `<upstream-tag>-georelay-<完整源码commit>`：
+成功、轻量检查和 check-only 不发通知。可信镜像构建、测试、合并操作、dispatch 或发布实际失败时发 Bark，含失败阶段、commit 与 PR/run 链接。beta 早期失败没有产物也能通知；合并后的 main 失败不要求 PR 仍 open。fork 和正常过期跳过不通知。
+
+### 标签与运行服务更新
+
+包名固定为 georelay 与 georelay-adapter，命名空间随 owner，源码仓库改名不改变包名。两个镜像使用相同版本：
+
+- 正式：`<upstream-tag>-georelay-<完整源码commit>`，浮动别名 `latest`。
+- beta：`<upstream-tag>-georelay-beta-<完整PR head commit>`，当前 PR 浮动别名 `beta-pr-N`。
+- 每个版本索引都支持 linux/amd64 与 linux/arm64，架构标签使用 -amd64/-arm64 后缀。
 
 ```text
 ghcr.io/srcheng17/georelay:<version>
 ghcr.io/srcheng17/georelay-adapter:<version>
 ```
 
-首页 Compose 片段和 [.env.example](../.env.example) 默认使用 `latest`，无需每次修改版本号。需要控制升级时机时，从两个 package 页面选择相同版本，设置为 stack 的 `GEORELAY_VERSION`。多架构索引支持 `linux/amd64` 和 `linux/arm64`，Docker 会选择对应架构。需要锁定镜像内容时分别使用两个镜像的 digest；版本标签本身不是注册表强制不可变的标签。
+首页 Compose 和 .env.example 默认 latest；控制升级时机可设置同一 GEORELAY_VERSION 或分别锁定两个镜像 digest。版本标签本身不受 registry 强制不可变保证。两 package 无原子推广，任一上传/回读失败都会使 workflow 失败；若浮动标签暂不一致，使用已验证的相同固定版本。
 
-`latest` 更新不会自动替换运行中的容器。先备份 TeslaMate 数据库和适配器永久身份库，再在现有 stack 目录拉取并重建两个服务：
+latest 发布不会自动替换运行容器。更新服务时，先备份 TeslaMate 数据库和适配器身份库，再从现有 stack 目录执行：
 
 ```sh
 docker compose pull teslamate georelay-adapter
 docker compose up -d teslamate georelay-adapter
 ```
 
-新版本可能包含 TeslaMate 数据库迁移；仅回退镜像不能撤销迁移。
+数据库迁移不能靠仅回退镜像撤销；本项目自动发布链路不执行这些生产操作。
 
-首次 package 发布后需设置为 public，并实际验证匿名拉取；公有仓库不代表 package 自动公开。updater 使用工作流的 `contents: write`、`pull-requests: write`、`actions: write` 权限，仓库需允许 Actions 创建 PR；它不会审批或合并 PR。已存在的同版本分支和 PR 会复用，异常 pin 或分支修改会拒绝。候选分支建立后 main 发生变化，也会停止并要求维护者复核，不自动重写该分支；运行中的或已成功的同提交构建不重复触发；失败时仅在 main 和候选分支未变的情况下可重试，源分支前进后需维护者处理该 PR。
+### GitHub 配置与首次生效
 
-镜像的 source/revision/version 标签对应本仓库源码 commit，该 commit 的 `upstream.json` 与补丁可重建该镜像。维护者仍需审查更新 PR 并同步 main；自动发布不会变更用户的 stack、数据库或运行镜像。
+在仓库 Settings → Secrets and variables → Actions 添加 repository secret `BARK_URL`，保存 HTTPS Bark endpoint；真实地址/设备 key 不进入代码、PR 或日志。GitHub hosted runner 必须能访问该 endpoint。先完成 payload dry-run、模拟接收及响应验证；Secret 缺失时明确报告未配置，不报告通知成功。请求有界重试，结果 uncertain 时不盲目重复发送；跨 workflow 重跑不承诺服务端幂等。
+
+首次控制器 PR 仍须维护者明确审阅/合并，进入 main 后 workflow_run 自动化才生效。保留 strict verify 分支保护与 Actions 来源，不启用管理员 bypass 或新增 PAT。updater 创建 PR/dispatch；独立控制器完成已授权的条件合并与 main dispatch。异常 pin/分支来源停止处理，已运行或成功发布的同提交不重复触发。Bark 配置及首次生效后的实际自动链路需单独验收。
+
+首次发布 package 需设置 public 并实际核验匿名拉取；公开 repo 不代表 package 自动公开。OCI source/revision/version 对应实际 tested commit；共享 prepare、pin 与补丁可重建镜像。
 
 ### 构建触发与镜像保留
 
-普通任务分支的 push 本身不发布镜像；PR 运行验证。`main` 的 push 根据整次改动判断是否需要镜像：仅 README、`docs/` 使用指南、agent 指令、Trellis 元数据或 `paseo.json` 改动时，只运行 Python 与空白检查，必需的 `verify` 汇总检查仍会完成。运行代码、补丁、`upstream.json`、测试、构建或发布流程，以及无法识别的路径，均执行完整双架构构建。删除和重命名也参与判断；无法确定改动范围时执行完整构建。手动 dispatch 始终完整构建，`publish` 默认关闭；上游更新自动化仍显式开启发布。
+普通分支 push 不增加重复构建；同仓 PR 更新触发 beta CI，未开 PR 的分支可手动 publish dispatch。fork 只验证，不持发布/Bark 写凭据。main push 只有镜像相关变更才完整构建和发布；README/docs/agent/Trellis/Paseo 元数据走轻量 Python/空白检查，required verify 仍出现。运行/未知路径、补丁、pin、测试及发布流程完整构建；删除/重命名计入。dispatch 始终完整构建，publish 默认关闭。
 
-[镜像保留工作流](../.github/workflows/image-retention.yml) 每周在 `main` 执行清理，手动运行默认只预览。它按两个 package 都具备版本索引和匹配 amd64/arm64 镜像的完整发布组计算，保留最近 10 组、两个 `latest` 及保留索引引用的子镜像。排序依据发布时间，不能只保留十条 registry version 记录，否则会破坏多架构镜像。
+[镜像保留工作流](../.github/workflows/image-retention.yml) 每周 main 清理，手动默认预览。正式两个 package 都有正确双架构镜像/索引才算完整组，保留最近 10 组、latest 及其引用；按组而非 version 记录数排序。beta 不占正式额度，当前作为未知标签受保护；beta 历史会增长，自动清理延期。
 
-清理与发布共用串行锁，先完成两个 package 的清单和依赖验证，再删除旧索引及不再被保留索引引用的子镜像。读取失败、元数据不完整或缺少被引用的镜像时，停止并保持镜像不变。不完整发布、未知标签和未关联的无标签记录保留供维护者复核，因此策略限制正常完整发布历史，并非 registry 所有记录的硬上限。被删除的旧版本或 digest 无法继续从 GHCR 拉取；需要长期保存的版本请提前同步到自己的仓库。
-
-本地只读预览命令：
+清理与发布共用串行锁；两个 package 全部清单和依赖验证后，先删旧索引再删无保留引用的子镜像。读取/解析或权限失败停止，不完整/未知/未关联记录保留，不构成 registry 总记录硬上限。需要长期拉取旧镜像请自行镜像保存。
 
 ```sh
 python3 scripts/retain_images.py --repository srcheng17/georelay
 ```
 
-读取 package version 清单需要相应权限；清理工作流使用仓库 `GITHUB_TOKEN`，仓库必须拥有这两个 package 的管理员权限，权限不足会停止。脚本默认不删除；只有显式 `--apply` 或手动工作流关闭 `dry_run` 才应用策略。PR 的 push、CI 通过和镜像发布均不构成合并授权，合并必须由维护者明确决定。
+此命令只读；只有 --apply 或清理 workflow 关闭 dry_run 才删除，需两个 package 的管理员权限。本次引入自动化的首次合入仍由维护者明确授权；后续候选只在本节定义的成功/当前 SHA/分支保护条件下自动合并。
 
 ## 来源与许可
 

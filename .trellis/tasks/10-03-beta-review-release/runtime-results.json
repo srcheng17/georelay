@@ -1,0 +1,71 @@
+{
+  "platform": "local native linux/arm64; orbstack",
+  "app_image": "georelay-main-smoke:checked-01a0fe28",
+  "probe_image": "georelay-adapter-main-smoke:checked-01a0fe28",
+  "results": [
+    {
+      "case": "default",
+      "exit": 0,
+      "seconds": 3.7,
+      "stdout": "Main image smoke passed: /sign_in HTTP 200, login HTML verified; migrations=105; core tables present; /notice and /license verified; compiled address checks passed",
+      "stderr": "",
+      "remaining_containers": 0,
+      "remaining_networks": 0
+    },
+    {
+      "case": "broken_entrypoint",
+      "exit": 1,
+      "seconds": 0.968,
+      "stdout": "",
+      "stderr": "Main image smoke failed: app state=exited exit=1",
+      "remaining_containers": 0,
+      "remaining_networks": 0
+    },
+    {
+      "case": "wrong_port_timeout",
+      "exit": 1,
+      "seconds": 5.556,
+      "stdout": "",
+      "stderr": "Main image smoke failed: HTTP readiness timeout",
+      "remaining_containers": 0,
+      "remaining_networks": 0
+    },
+    {
+      "case": "TERM_to_bash_only",
+      "exit": 143,
+      "seconds": 1.002,
+      "signal_to_cleanup_seconds": 0.43,
+      "stdout": "",
+      "stderr": "",
+      "remaining_containers": 0,
+      "remaining_networks": 0,
+      "remaining_temp_files": 0
+    }
+  ],
+  "app_image_metadata": {
+    "id": "sha256:5a73784a17f8349662ea2e7c8634c0f29c8abd05f8dc08aa7d1b0141bff1f123",
+    "os": "linux",
+    "architecture": "arm64",
+    "entrypoint": [
+      "tini",
+      "--",
+      "/bin/dash",
+      "/entrypoint.sh"
+    ],
+    "cmd": [
+      "bin/teslamate",
+      "start"
+    ]
+  },
+  "probe_image_metadata": {
+    "id": "sha256:554bb4d9265a0e19e24e1f826bdbd7e7a1dbf539eaacdccb7d492b88fbc8a9b8",
+    "os": "linux",
+    "architecture": "arm64",
+    "entrypoint": null,
+    "cmd": [
+      "python",
+      "-m",
+      "adapter.server"
+    ]
+  }
+}

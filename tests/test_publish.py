@@ -29,10 +29,10 @@ elif args[:2] == ["image", "inspect"] and "--format" in args:
     print("linux/" + os.environ["IMAGE_ARCHITECTURE"])
 elif args[:2] == ["image", "inspect"]:
     labels = {"org.opencontainers.image." + key: value for key, value in {
-        "source": os.environ["IMAGE_SOURCE"], "revision": os.environ["GITHUB_SHA"],
+        "source": os.environ["IMAGE_SOURCE"], "revision": os.environ["SOURCE_SHA"],
         "version": os.environ["IMAGE_VERSION"]}.items()}
     if os.environ.get("FAKE_BAD_LABEL"):
-        labels["org.opencontainers.image.revision"] = "wrong"
+        labels["org.opencontainers.image." + os.environ["FAKE_BAD_LABEL"]] = "wrong"
     print(json.dumps([{"Os": "linux", "Architecture": state["architecture"], "Config": {"Labels": labels}}]))
 elif args[0] == "run":
     if os.environ.get("FAKE_UID_FAIL"):
@@ -45,10 +45,10 @@ elif args[0] == "push":
 elif args[:3] == ["buildx", "imagetools", "create"]:
     target = args[args.index("--tag") + 1]
     package = target.split(":")[0].rsplit("/", 1)[-1]
-    if target.endswith(":latest"):
+    if "--prefer-index=false" in args:
         if os.environ.get("FAKE_FAIL_LATEST") == package:
             sys.exit(1)
-        assert "--prefer-index=false" in args and "@sha256:" in args[-1], "latest must copy the verified index digest"
+        assert "@sha256:" in args[-1], "floating tag must copy the verified index digest"
         raw = state["indexes"][args[-1]]
         if os.environ.get("FAKE_BAD_LATEST") == package:
             index = json.loads(raw)
@@ -124,6 +124,12 @@ class PublicationTests(unittest.TestCase):
             "    assert path == '/git/ref/tags/' + latest\n"
             "    return {'object': {'type': 'commit', 'sha': 'b' * 40}}\n"
             "check_release.github_json = fake_release\n"
+            "import update_release\n"
+            "def fake_github(method,path,payload=None):\n"
+            "    assert method == 'GET' and '/pulls/' in path\n"
+            "    if os.environ.get('FAKE_PR_FAIL'): raise RuntimeError('fake-private-error')\n"
+            "    return json.loads(os.environ['FAKE_PR'])\n"
+            "update_release.github = fake_github\n"
         )
 
     def git(self, *args):
@@ -145,6 +151,7 @@ class PublicationTests(unittest.TestCase):
 
     def publish(self, **overrides):
         self.state.unlink(missing_ok=True)
+        event = overrides.pop("event", None)
         environment = {
             **os.environ,
             "PATH": str(self.bin) + os.pathsep + os.environ["PATH"],
@@ -160,6 +167,16 @@ class PublicationTests(unittest.TestCase):
             "PYTHONPATH": str(self.pythonpath),
             **overrides,
         }
+        if event is None:
+            inputs = {"publish": environment.get("PUBLISH_REQUESTED", "false"),
+                      "source_pr": environment.get("SOURCE_PR", ""),
+                      "expected_main_sha": environment.get("EXPECTED_MAIN_SHA", "")}
+            event = {"inputs": inputs} if environment["GITHUB_EVENT_NAME"] == "workflow_dispatch" else {}
+        event_path = self.directory / "event.json"
+        event_path.write_text(json.dumps(event))
+        environment["GITHUB_EVENT_PATH"] = str(event_path)
+        if environment["GITHUB_EVENT_NAME"] == "pull_request":
+            environment.setdefault("FAKE_PR", json.dumps(event["pull_request"]))
         result = subprocess.run(
             ["bash", str(ROOT / "scripts/publish_images.sh"), str(self.artifacts)],
             cwd=self.repo, env=environment, text=True, stdout=subprocess.PIPE, stderr=subprocess.PIPE,
@@ -206,7 +223,7 @@ class PublicationTests(unittest.TestCase):
         self.assertNotIn("renamed-project", summary)
 
     def test_publication_failure_stops_before_indexes(self):
-        for overrides in ({"FAKE_FAIL_PUSH": "arm64"}, {"FAKE_BAD_LABEL": "1"}):
+        for overrides in ({"FAKE_FAIL_PUSH": "arm64"}, *({"FAKE_BAD_LABEL": key} for key in ("revision", "source", "version"))):
             with self.subTest(overrides=overrides):
                 result, commands = self.publish(**overrides)
                 self.assertNotEqual(result.returncode, 0)
@@ -238,19 +255,19 @@ class PublicationTests(unittest.TestCase):
         self.assertNotEqual(result.returncode, 0)
         self.assertEqual(len(self.latest_commands(commands)), 1)
 
-    def test_newer_official_release_skips_latest_but_preserves_version_publication(self):
-        result, commands = self.publish(FAKE_LATEST_TAG="v999.0.0")
-        self.assertEqual(result.returncode, 0, result.stderr)
-        self.assertIn("newer official stable release", result.stdout)
-        self.assertEqual(self.latest_commands(commands), [])
-        self.assertEqual(len([command for command in commands if command[:3] == ["buildx", "imagetools", "create"]]), 2)
+    def test_main_reviewed_pin_promotes_latest_without_querying_newest_release(self):
+        for overrides in ({"FAKE_LATEST_TAG": "v999.0.0"}, {"FAKE_LATEST_FAIL": "1"}):
+            with self.subTest(overrides=overrides):
+                result, commands = self.publish(**overrides)
+                self.assertEqual(result.returncode, 0, result.stderr)
+                self.assertEqual(len(self.latest_commands(commands)), 2)
 
-    def test_release_api_failure_or_invalid_report_prevents_latest(self):
-        for failure in ("FAKE_LATEST_FAIL", "FAKE_LATEST_PRERELEASE"):
-            with self.subTest(failure=failure):
-                result, commands = self.publish(**{failure: "1"})
-                self.assertNotEqual(result.returncode, 0)
-                self.assertEqual(self.latest_commands(commands), [])
+    def test_main_dispatch_uses_expected_merge_commit_and_publishes_latest(self):
+        sha = self.git("rev-parse", "HEAD")
+        result, commands = self.publish(GITHUB_EVENT_NAME="workflow_dispatch", event={"inputs": {"publish": "true", "expected_main_sha": sha, "source_pr": "42"}})
+        self.assertEqual(result.returncode, 0, result.stderr)
+        self.assertEqual(len(self.latest_commands(commands)), 2)
+        self.assertFalse(any("-georelay-beta-" in str(command) for command in commands))
 
     def test_obsolete_main_source_cannot_overwrite_latest(self):
         newer = self.newer_remote_commit()
@@ -262,9 +279,9 @@ class PublicationTests(unittest.TestCase):
 
     def test_reject_unrequested_or_untrusted_publication(self):
         for overrides in (
-            {"GITHUB_EVENT_NAME": "pull_request"},
             {"GITHUB_EVENT_NAME": "workflow_dispatch", "PUBLISH_REQUESTED": "false"},
-            {"GITHUB_EVENT_NAME": "workflow_dispatch", "PUBLISH_REQUESTED": "true", "GITHUB_REF": "refs/heads/feature"},
+            {"GITHUB_EVENT_NAME": "workflow_dispatch", "PUBLISH_REQUESTED": "yes"},
+            {"GITHUB_EVENT_NAME": "workflow_dispatch", "PUBLISH_REQUESTED": "true", "EXPECTED_MAIN_SHA": "b" * 40},
             {"GITHUB_SHA": "0" * 40},
             {"FAKE_PRERELEASE": "1"},
         ):
@@ -309,8 +326,9 @@ class PublicationTests(unittest.TestCase):
         self.git("commit", "--quiet", "-m", "new stable pin")
         self.git("push", "--quiet", "origin", "HEAD:refs/heads/upstream/v999.0.0")
         dispatch = {"GITHUB_EVENT_NAME": "workflow_dispatch", "PUBLISH_REQUESTED": "true", "GITHUB_REF": "refs/heads/upstream/v999.0.0"}
-        result, _ = self.publish(**dispatch)
+        result, commands = self.publish(**dispatch)
         self.assertEqual(result.returncode, 0, result.stderr)
+        self.assertEqual(self.latest_commands(commands), [])
         result, commands = self.publish(**{**dispatch, "GITHUB_REF": "refs/heads/upstream/v999.0.1"})
         self.assertNotEqual(result.returncode, 0)
         self.assertEqual(commands, [])
@@ -321,26 +339,81 @@ class PublicationTests(unittest.TestCase):
         self.assertNotEqual(result.returncode, 0)
         self.assertEqual(commands, [])
 
-    def test_upstream_source_or_parent_changed_during_publication_skips_latest(self):
-        pin = json.loads((self.repo / "upstream.json").read_text())
-        pin["tag"] = "v999.0.0"
-        (self.repo / "upstream.json").write_text(json.dumps(pin))
-        self.git("add", "upstream.json")
-        self.git("commit", "--quiet", "-m", "new stable pin")
-        self.git("push", "--quiet", "origin", "HEAD:refs/heads/upstream/v999.0.0")
+    def test_unlinked_branch_dispatch_publishes_only_immutable_beta(self):
+        result, commands = self.publish(GITHUB_EVENT_NAME="workflow_dispatch", PUBLISH_REQUESTED="true", GITHUB_REF="refs/heads/feature")
+        self.assertEqual(result.returncode, 0, result.stderr)
+        self.assertEqual(self.latest_commands(commands), [])
+        creates = [command for command in commands if command[:3] == ["buildx", "imagetools", "create"]]
+        self.assertEqual(len(creates), 2)
+        self.assertTrue(all("-georelay-beta-" in command[command.index("--tag") + 1] for command in creates))
+
+    def beta_event(self):
+        sha = self.git("rev-parse", "HEAD")
+        repository = {"full_name": "example/georelay"}
+        return {"number": 42, "pull_request": {
+            "number": 42, "state": "open", "draft": False,
+            "head": {"sha": sha, "ref": "feature", "repo": repository},
+            "base": {"ref": "main", "repo": repository},
+        }}
+
+    def test_pr_head_commit_drives_beta_labels_indexes_and_pr_aliases(self):
+        event = self.beta_event()
+        self.git("push", "--quiet", "origin", "HEAD:refs/pull/42/head")
+        result, commands = self.publish(event=event, GITHUB_EVENT_NAME="pull_request", GITHUB_REF="refs/pull/42/merge", GITHUB_SHA="d" * 40)
+        self.assertEqual(result.returncode, 0, result.stderr)
+        self.assertEqual(self.latest_commands(commands), [])
+        state = json.loads(self.state.read_text())
+        version = json.loads((self.repo / "upstream.json").read_text())["tag"] + "-georelay-beta-" + event["pull_request"]["head"]["sha"]
+        for package in ("ghcr.io/example/georelay", "ghcr.io/example/georelay-adapter"):
+            self.assertEqual(state["indexes"][package + ":beta-pr-42"], state["indexes"][package + ":" + version])
+        self.assertEqual(len([command for command in commands if command[0] == "load"]), 2)
+
+    def test_fork_or_unchecked_head_has_no_registry_writes(self):
+        for failure in ("fork", "checkout"):
+            with self.subTest(failure=failure):
+                event = self.beta_event()
+                if failure == "fork":
+                    event["pull_request"]["head"]["repo"] = {"full_name": "fork/georelay"}
+                else:
+                    event["pull_request"]["head"]["sha"] = "e" * 40
+                result, commands = self.publish(event=event, GITHUB_EVENT_NAME="pull_request", GITHUB_REF="refs/pull/42/merge")
+                self.assertNotEqual(result.returncode, 0)
+                self.assertEqual(commands, [])
+
+    def test_changed_head_closed_or_draft_pr_cannot_update_beta_alias(self):
+        event = self.beta_event()
+        self.git("push", "--quiet", "origin", "HEAD:refs/pull/42/head")
         newer = self.newer_remote_commit()
-        dispatch = {"GITHUB_EVENT_NAME": "workflow_dispatch", "PUBLISH_REQUESTED": "true", "GITHUB_REF": "refs/heads/upstream/v999.0.0"}
-        for ref, reason in (
-            ("refs/heads/upstream/v999.0.0", "source branch has changed"),
-            ("refs/heads/main", "no longer has current main as its parent"),
-        ):
-            with self.subTest(ref=ref):
-                result, commands = self.publish(**dispatch, FAKE_REMOTE_UPDATE=json.dumps({ref: newer}))
+        for failure in ("head", "closed", "draft", "association"):
+            with self.subTest(failure=failure):
+                pull = json.loads(json.dumps(event["pull_request"]))
+                if failure == "head":
+                    update = {"refs/pull/42/head": newer}
+                else:
+                    update = {}
+                    if failure == "closed":
+                        pull["state"] = "closed"
+                    elif failure == "draft":
+                        pull["draft"] = True
+                    else:
+                        pull["head"]["ref"] = "different-branch"
+                result, commands = self.publish(event=event, GITHUB_EVENT_NAME="pull_request", GITHUB_REF="refs/pull/42/merge", FAKE_PR=json.dumps(pull), FAKE_REMOTE_UPDATE=json.dumps(update))
                 self.assertEqual(result.returncode, 0, result.stderr)
-                self.assertIn(reason, result.stdout)
+                self.assertIn("promotion skipped", result.stdout)
+                self.assertFalse(any("--prefer-index=false" in command for command in commands))
                 self.assertEqual(self.latest_commands(commands), [])
-                # Restore both remote refs for the next case's strict version preflight.
-                self.git("push", "--quiet", "origin", "+HEAD:refs/heads/upstream/v999.0.0", "+HEAD^:refs/heads/main")
+                self.git("push", "--quiet", "origin", "+HEAD:refs/pull/42/head")
+
+    def test_linked_dispatch_uses_same_beta_schema_and_requires_current_pr(self):
+        event = self.beta_event()
+        self.git("push", "--quiet", "origin", "HEAD:refs/pull/42/head")
+        args = {"GITHUB_EVENT_NAME": "workflow_dispatch", "GITHUB_REF": "refs/heads/feature", "PUBLISH_REQUESTED": "true", "SOURCE_PR": "42", "FAKE_PR": json.dumps(event["pull_request"])}
+        result, commands = self.publish(**args)
+        self.assertEqual(result.returncode, 0, result.stderr)
+        self.assertEqual(len([command for command in commands if "--prefer-index=false" in command]), 2)
+        result, commands = self.publish(**args, FAKE_PR_FAIL="1")
+        self.assertNotEqual(result.returncode, 0)
+        self.assertFalse(any("--prefer-index=false" in command for command in commands))
 
     def test_upstream_already_obsolete_at_start_keeps_strict_preflight(self):
         pin = json.loads((self.repo / "upstream.json").read_text())

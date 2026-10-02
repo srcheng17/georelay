@@ -1,0 +1,7 @@
+{
+  "command": "python3 -m unittest discover -s tests -v",
+  "source": "integration of main c8a6e83; official Dockerfile and address-only patches",
+  "exit": 0,
+  "seconds": 85.9,
+  "summary": "----------------------------------------------------------------------\nRan 130 tests in 85.830s\n\nOK"
+}

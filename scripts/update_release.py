@@ -1,5 +1,5 @@
 #!/usr/bin/env python3
-"""Create a pin-only update PR and dispatch checked version publication."""
+"""Create a pin-only update PR and dispatch checked beta publication."""
 
 import argparse
 import base64
@@ -12,6 +12,7 @@ import sys
 
 from check_release import check_release
 from prepare_upstream import ROOT, load_pin
+from image_context import pull_number
 
 
 class UpdateError(ValueError):
@@ -116,10 +117,10 @@ def update_release(repository, pin, source, api=github, run=command, detect=chec
                 "Official stable release: " + report["release_url"] + "\n\n"
                 "Pinned official commit: `" + proposed["commit"] + "`.\n"
                 "Source main commit: `" + source + "`. This PR changes only `upstream.json`.\n\n"
-                "CI is explicitly dispatched to test the patches and both architectures, then publish versioned images "
-                "and promote latest after both version indexes pass verification and source freshness checks. "
-                "A conflict or failed check stops publication. This workflow does not merge the PR, change patches, "
-                "or deploy services."
+                "CI is explicitly dispatched to test the patches and both architectures, then publish checked beta images. "
+                "The trusted controller may merge this PR only after beta succeeds and its head and main baseline remain current. "
+                "After merge, main is explicitly dispatched to test and publish formal images and latest. "
+                "Failures stop the affected stage and trigger Bark when configured. No running services are deployed."
             ),
         })
     if (
@@ -128,6 +129,10 @@ def update_release(repository, pin, source, api=github, run=command, detect=chec
         or not re.fullmatch(r"https://github\.com/" + re.escape(repository) + r"/pull/[1-9]\d*", pull["html_url"])
     ):
         raise UpdateError("Update PR is closed or changed; manual review required")
+
+    number = pull_number(pull["number"])
+    if pull["html_url"] != "https://github.com/" + repository + "/pull/" + number:
+        raise UpdateError("Update PR number does not match its URL")
 
     # Recheck mutable refs and the official proposal before dispatching.
     if ref("main") != source or ref(branch) != revision or detect(pin)["proposed"] != proposed:
@@ -154,11 +159,12 @@ def update_release(repository, pin, source, api=github, run=command, detect=chec
         elif item["status"] != "completed":
             raise UpdateError("Unknown workflow run status")
     if not started:
-        run("gh", "workflow", "run", "ci.yml", "--repo", repository, "--ref", branch, "-f", "publish=true")
+        run("gh", "workflow", "run", "ci.yml", "--repo", repository, "--ref", branch,
+            "-f", "publish=true", "-f", "source_pr=" + number)
     report.update({
         "status": "already_started" if started else "dispatched",
         "branch": branch, "source_main": source, "source_commit": revision, "pull_request": pull["html_url"],
-        "next_step": "CI tests both architectures before publishing versions and promoting latest from current sources. No automatic merge or deployment.",
+        "next_step": "CI tests both architectures before publishing beta. The trusted controller may merge a still-current PR, then dispatch main for checked formal images/latest. No running services are deployed.",
     })
     return report
 

@@ -80,7 +80,7 @@ class GitHubFixture:
             return [] if self.pull is None else [self.pull]
         if method == "POST" and path == "/pulls":
             self.pull = {
-                "state": "open", "head": {"sha": self.branch, "ref": payload["head"]},
+                "number": 1, "state": "open", "head": {"sha": self.branch, "ref": payload["head"]},
                 "base": {"ref": "main"}, "html_url": "https://github.com/fixture/teslamate/pull/1",
             }
             return self.pull
@@ -135,7 +135,9 @@ class UpdateReleaseTests(unittest.TestCase):
         self.assertEqual(mutations[2][1]["parents"], [MAIN])
         self.assertEqual(mutations[3][1]["ref"], "refs/heads/upstream/v4.3.1")
         self.assertIn(MAIN, mutations[4][1]["body"])
-        self.assertEqual(fixture.dispatches(), [("gh", "workflow", "run", "ci.yml", "--repo", REPOSITORY, "--ref", "upstream/v4.3.1", "-f", "publish=true")])
+        self.assertIn("checked beta images", mutations[4][1]["body"])
+        self.assertIn("trusted controller may merge", report["next_step"])
+        self.assertEqual(fixture.dispatches(), [("gh", "workflow", "run", "ci.yml", "--repo", REPOSITORY, "--ref", "upstream/v4.3.1", "-f", "publish=true", "-f", "source_pr=1")])
 
     def test_existing_queued_running_and_published_builds_are_idempotent(self):
         for status, conclusion in (("queued", ""), ("in_progress", ""), ("completed", "success")):
@@ -216,6 +218,17 @@ class UpdateReleaseTests(unittest.TestCase):
         with self.assertRaises(ValueError):
             fixture.update()
         self.assertEqual(fixture.dispatches(), [])
+
+    def test_invalid_or_mismatched_pr_number_stops_dispatch(self):
+        for number in (True, 0, "01", 2):
+            with self.subTest(number=number):
+                fixture = GitHubFixture()
+                fixture.update()
+                fixture.commands.clear()
+                fixture.pull["number"] = number
+                with self.assertRaises(ValueError):
+                    fixture.update()
+                self.assertEqual(fixture.dispatches(), [])
 
     def test_mutable_ref_or_official_proposal_change_before_dispatch_stops(self):
         fixture = GitHubFixture()

@@ -1,0 +1,106 @@
+{
+  "integration_base": "c8a6e837d32a8757043fa4d2a5f6abd876a64bb3",
+  "merge_authorized": true,
+  "latest_before_beta": {
+    "georelay": {
+      "digest": "sha256:01938ac18e399761abd5d2663d9a9c1e05db704b18c84590bf0196599a86c588",
+      "platforms": [
+        "linux/amd64",
+        "linux/arm64"
+      ]
+    },
+    "georelay-adapter": {
+      "digest": "sha256:a8a7318d397df1bddb75d4fe6396adae9af32c1a724f4e2b934668c3b98ac2a2",
+      "platforms": [
+        "linux/amd64",
+        "linux/arm64"
+      ]
+    }
+  },
+  "pr": "https://github.com/srcheng17/georelay/pull/10",
+  "beta_run": 37070822103,
+  "main_run": null,
+  "beta_runs": [
+    {
+      "id": 37068534907,
+      "head": "3a52ad71d39e59525e760867ca7075a985c6e7a5",
+      "conclusion": "failure",
+      "checks": "success",
+      "build-amd64": "failure at Python checks",
+      "build-arm64": "failure at Python checks",
+      "verify": "failure",
+      "publish": "skipped",
+      "main_runtime": "not executed",
+      "cause": "Linux E2BIG for large FAKE_BODY environment values in offline HTTP fixture; root reproduced both oversized cases in isolated Linux container"
+    },
+    {
+      "id": 37069337733,
+      "head": "fdb9375ca0e8e40175509c4eafaa09eb9d43aaad",
+      "conclusion": "success",
+      "build-amd64": {
+        "startup": "success",
+        "migrations": 105,
+        "adapter_tests": 34
+      },
+      "build-arm64": {
+        "startup": "success",
+        "migrations": 105,
+        "adapter_tests": 34
+      },
+      "verify": "success",
+      "publish": "success"
+    },
+    {
+      "id": 37070822103,
+      "head": "66b9001b888da9a3b71dc3f6cff269b842de96ee",
+      "conclusion": "failure",
+      "build-arm64": {
+        "startup": "success",
+        "migrations": 105,
+        "adapter_tests": 34
+      },
+      "build-amd64": {
+        "startup": "skipped",
+        "adapter_tests": "33/34; slow-drip subprocess exhausted 0.3s startup budget before first HTTP request"
+      },
+      "verify": "failure",
+      "publish": "skipped",
+      "cause": "test fixture assumed interpreter startup and adapter import complete within 300ms; deadline correctly returned 504 and wall-clock bound passed"
+    }
+  ],
+  "linux_fixture_fix": {
+    "files": [
+      "tests/test_main_image.py"
+    ],
+    "root_cause": "oversized response fixture passed through Linux environment string limit",
+    "transport": "temporary UTF-8 file; environment contains path only",
+    "mac_targeted": "12/12 in 24.301s",
+    "linux_arm64_targeted": "12/12 in 52.495s; offline fixture, not real app startup",
+    "oversized_ascii_and_unicode_regressions": "preserved and passed"
+  },
+  "beta_registry": {
+    "both_indexes": "exact amd64/arm64 with valid OCI revision/version/digests",
+    "beta-pr-10": "matches checked version",
+    "latest": "unchanged from before beta"
+  },
+  "bark_secret": {
+    "name": "BARK_URL",
+    "configured": true,
+    "verified": "GitHub secret name readback; HTTPS format validated without emitting endpoint/key"
+  },
+  "controller_api_fix": {
+    "cause": "GitHub run.name equals custom run-name; workflow.name is the logical workflow name",
+    "fix": "bind source to verified workflow id/path/name; keep strict display_title parsing",
+    "tests": "14/14; old guard fails with real-shape fixture; real apply=False now candidate_ready"
+  },
+  "slow_drip_fixture_fix": {
+    "files": [
+      "tests/test_adapter.py"
+    ],
+    "root_cause": "0.3s subprocess budget can expire during interpreter startup/import before actual HTTP in packaged CI",
+    "test_only": "five-second drip; two-second subprocess budget; three-second wall-clock bound; actual HTTP assertion retained; production adapter unchanged",
+    "linux_arm64_before": "controlled 0.4s startup delay reproduces empty HTTP requests; original 504/wall bound pass and child exited",
+    "linux_arm64_after": "same delay: real HTTP, 504, wall bound and child SIGKILL verified; elapsed 2.138s",
+    "linux_arm64_packaged_suite": "34/34 in 13.522s; no external network; imported /app/adapter/server.py; container removed"
+  }
+}
