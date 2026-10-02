@@ -8,7 +8,7 @@
 
 <!-- @@@auto:current-status -->
 - **Active File**: `journal-1.md`
-- **Total Sessions**: 10
+- **Total Sessions**: 12
 - **Last Active**: 2026-10-03
 <!-- @@@/auto:current-status -->
 
@@ -19,7 +19,7 @@
 <!-- @@@auto:active-documents -->
 | File | Lines | Status |
 |------|-------|--------|
-| `journal-1.md` | ~337 | Active |
+| `journal-1.md` | ~352 | Active |
 <!-- @@@/auto:active-documents -->
 
 ---
@@ -29,6 +29,7 @@
 <!-- @@@auto:session-history -->
 | # | Date | Title | Commits | Branch |
 |---|------|-------|---------|--------|
+| 12 | 2026-10-03 | Verify GeoRelay image lifecycle integration | `98e83d80602f98dcaa820d894fce0f063a79e63b` | `feat/image-lifecycle` |
 | 10 | 2026-10-03 | Optimize image build and retention lifecycle | `b9e524c9f44b46578bd9c8e05002a823e992d8ac` | `feat/image-lifecycle` |
 | 9 | 2026-10-03 | latest 双镜像发布验收 | `38d9bad`, `faefae6` | `feat/amap-adapter` |
 | 8 | 2026-10-03 | 多供应商与公开双架构镜像交付 | `f8dbc92`, `fbd2953`, `1b21b64` | `feat/amap-adapter` |

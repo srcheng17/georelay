@@ -320,3 +320,33 @@ PR #2 正常合并，main CI 37034259606 双架构、verify、publish全部成�
 
 - Inspect native PR checks; await explicit user instruction before merging
 - Paseo PR合并后自动归档曾中断会话，已只读确认原因；不修改生产服务。
+
+
+## Session 12: Verify GeoRelay image lifecycle integration
+<!-- trellis-session: v=2 fp=81419be8b89b9f2d -->
+
+**Date**: 2026-10-03
+**Task**: Verify GeoRelay image lifecycle integration
+**Branch**: `feat/image-lifecycle`
+
+### Summary
+
+Synced concurrent main 3e6cbfa into feat/image-lifecycle, aligned retention with GeoRelay publisher convention, and preserved legal input builds. 87 tests and full-scope review passed. Anonymous public registry preview verified one paired release; no live DELETE or deployment. Final PR remains for explicit user review and merge authorization.
+
+### Git Commits
+
+| Hash | Message |
+|------|---------|
+| `98e83d80602f98dcaa820d894fce0f063a79e63b` | ci(release): align lifecycle with GeoRelay publisher |
+
+### Testing
+
+- [OK] 87 tests and full-scope review passed; actionlint, compilation, shell syntax and whitespace passed
+
+### Status
+
+[OK] **Completed**
+
+### Next Steps
+
+- Verify native PR CI and leave PR open for user review
