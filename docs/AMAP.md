@@ -172,6 +172,7 @@ docker compose -f compose.example.yaml cp amap-adapter:/data/adapter-snapshot.sq
 2. 检测到新版本后，自动创建 `upstream/<tag>` 分支，仅修改 `upstream.json`，并打开更新 PR。tag 解引用到完整 commit；草稿、预发布、降级或移动 tag 会停止处理。
 3. 显式触发 [Validate and build](../.github/workflows/ci.yml)。原生 amd64 和 arm64 runner 分别验证 Python、严格补丁、ExUnit、镜像架构/许可及非 root 健康检查。任一失败都会阻止发布，更新 PR 保留供维护者修复，不自动合并。
 4. 检查全部通过后，从两份已测试镜像产物发布架构标签和多架构版本索引，不重新构建。`main` 的 push 也会自动发布；仍可在 `main` 手动运行并勾选 `publish`。
+5. 两个版本索引都发布并验证后，更新两个 `latest` 并回读核对。发布任务串行执行，过期的官方版本或源码任务不能覆盖 `latest`。两个 package 无法原子更新；任何更新或回读失败都会让工作流失败，此时两个 `latest` 可能暂时不一致，应使用已发布的相同固定版本。
 
 两个公开镜像使用同一版本，标签格式为 `<upstream-tag>-amap-<完整源码commit>`：
 
@@ -180,7 +181,16 @@ ghcr.io/srcheng17/teslamate-amap:<version>
 ghcr.io/srcheng17/teslamate-amap-adapter:<version>
 ```
 
-从两个 package 页面选择相同版本，将其设置为 stack 的 `TESLAMATE_AMAP_VERSION`。多架构索引支持 `linux/amd64` 和 `linux/arm64`，Docker 会选择对应架构。需要锁定镜像内容时使用 digest；版本标签本身不是注册表强制不可变的标签。没有自动 `latest` / `stable` 提升。
+首页 Compose 片段和 [.env.example](../.env.example) 默认使用 `latest`，无需每次修改版本号。需要控制升级时机时，从两个 package 页面选择相同版本，设置为 stack 的 `TESLAMATE_AMAP_VERSION`。多架构索引支持 `linux/amd64` 和 `linux/arm64`，Docker 会选择对应架构。需要锁定镜像内容时分别使用两个镜像的 digest；版本标签本身不是注册表强制不可变的标签。
+
+`latest` 更新不会自动替换运行中的容器。先备份 TeslaMate 数据库和适配器永久身份库，再在现有 stack 目录拉取并重建两个服务：
+
+```sh
+docker compose pull teslamate amap-adapter
+docker compose up -d teslamate amap-adapter
+```
+
+新版本可能包含 TeslaMate 数据库迁移；仅回退镜像不能撤销迁移。
 
 首次 package 发布后需设置为 public，并实际验证匿名拉取；公有仓库不代表 package 自动公开。updater 使用工作流的 `contents: write`、`pull-requests: write`、`actions: write` 权限，仓库需允许 Actions 创建 PR；它不会审批或合并 PR。已存在的同版本分支和 PR 会复用，异常 pin 或分支修改会拒绝。候选分支建立后 main 发生变化，也会停止并要求维护者复核，不自动重写该分支；运行中的或已成功的同提交构建不重复触发；失败时仅在 main 和候选分支未变的情况下可重试，源分支前进后需维护者处理该 PR。
 

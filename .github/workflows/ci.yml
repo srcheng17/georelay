@@ -7,7 +7,7 @@ on:
   workflow_dispatch:
     inputs:
       publish:
-        description: Publish checked versioned images (main or upstream/<stable-tag>; no deployment)
+        description: Publish checked versions and latest (main or upstream/<stable-tag>; no deployment)
         type: boolean
         default: false
 
@@ -113,6 +113,9 @@ jobs:
   publish:
     needs: [build, verify]
     if: (github.event_name == 'push' && github.ref == 'refs/heads/main') || (github.event_name == 'workflow_dispatch' && inputs.publish)
+    concurrency:
+      group: ghcr-publication-${{ github.repository }}
+      cancel-in-progress: false
     runs-on: ubuntu-latest
     timeout-minutes: 30
     permissions:

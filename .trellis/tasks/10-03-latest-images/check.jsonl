@@ -1,0 +1,3 @@
+{"file": ".trellis/spec/backend/quality-guidelines.md", "reason": "发布 fail closed、源码追溯及文档一致性"}
+{"file": ".trellis/tasks/10-03-latest-images/prd.md", "reason": "用户授权与latest验收"}
+{"file": ".trellis/tasks/10-03-latest-images/design.md", "reason": "推广顺序、并发与过期来源防护"}
