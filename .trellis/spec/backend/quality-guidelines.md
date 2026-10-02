@@ -2,6 +2,8 @@
 
 使用 Python 标准库实现和 unittest，优先直接函数与 SQLite 约束。非平凡逻辑留下能复现实际失败的测试；mock 使用虚构公共地标坐标，禁止生产数据。覆盖 reverse/lookup 身份闭环、重启、TTL、语言、并发、境外、错误与超时；真实本地 HTTP 测试验证 JSON/status/log 隐私。
 
+真实 Key 联调须有用户授权，只读提取所需单个变量，经 stdin 写入独立测试容器的0600 tmpfs文件，不把值放入argv、环境或日志。使用公共地标、独立网络和临时数据卷，无host port；只对测试库过期缓存、只断开测试网络，结束删除资源。保存脱敏断言结果，不提交响应或数据库。高德当前不传语言参数，语言切换只断言身份/坐标与刷新闭环，不能要求英文翻译；health成功不能替代真实provider检查。
+
 固定 `upstream.json` 中稳定 tag 和解引用 commit，下载到临时/忽略目录；先校验 commit 再 `git apply --check`，任何失败停止。保留上游 LICENSE/NOTICE。GitHub release 检测只提出 pin 更新；校验、构建与可选镜像发布互相依赖，发布仅可信分支手动触发且不得绕过测试。不自动部署、不自动提升 stable、不 force push。
 
 改动最少的必要文件，不引入框架/ORM/插件层。构建流程本身要有失败测试。新增测试路径必须与 workflow 和 README 命令一致。

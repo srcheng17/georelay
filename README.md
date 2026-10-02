@@ -9,7 +9,7 @@
 - 提供 `/reverse`、`/lookup`、`/health`；SQLite 永久负数身份、按语言分开的响应缓存；无真实 Key 的模拟与本地 HTTP 测试。
 - URL 补丁同时修改 Geocoder 和专用 Finch pool，保留 size=3 与 proxy；官方默认仍为 OSM。
 - PR 校验、固定版本构建、稳定 release 检测和手动版本镜像发布流程；不自动提升 stable，不自动部署。
-- **不修改生产服务、PostgreSQL 或 Dockhand stack。** 旧私人版身份导入、数据库升级迁移、真实 Key 联调尚未执行。
+- **不修改生产服务、PostgreSQL 或 Dockhand stack。** 真实 Key 已在隔离容器联调通过；旧私人版身份导入、数据库升级迁移尚未执行。
 
 这只改变地址文字来源。HedgieMate/Grafana 的底图、地图纠偏和刷新频率由客户端负责。数据库、轨迹、SQLite 和 adapter 返回值始终保留 **WGS84**；只有发给高德的查询坐标临时转成 GCJ-02，不会写回或造成客户端二次纠偏。
 
@@ -52,7 +52,11 @@ Sidecar 配置：
 
 reverse 总预算为 `min(25, 2 × UPSTREAM_TIMEOUT_SECONDS + 1)` 秒，包含必要的地区确认；lookup 共用整批预算。响应体最多 1 MiB，lookup 最多 50 个本地身份。超时或上游错误返回明确失败，不合成永久 `Unknown`。`/health` 仅证明本地存储可用，不证明 Key、配额或外网正常。
 
+`Accept-Language` 区分缓存并传给 OSM；当前高德查询不传语言参数，英文请求也可能返回中文地址。
+
 ## 开发与验证
+
+2026-10-02 使用现有 Key，在独立非 root、只读根文件系统、无 host port 的容器中完成18项真实联调检查：北京/杭州走高德，巴黎/首尔/香港/澳门走 OSM；混合语言 lookup、重启、TTL 刷新和断网恢复均保留负数身份与原始 WGS84。有效缓存断网可用，过期缓存明确失败。Key 经标准输入写入临时内存文件系统，测试资源已清理，生产容器未重启。详见[验收记录](.trellis/tasks/archive/2026-10/10-02-amap-mvp/validation.md)。这证明所测样本和当前 Key 可用，不代表全球覆盖或生产迁移已验证。
 
 无需真实 Key：
 
