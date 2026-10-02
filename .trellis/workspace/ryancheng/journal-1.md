@@ -300,3 +300,38 @@ PR #2 正常合并，main CI 37034259606 双架构、verify、publish全部成�
 ### Next Steps
 
 - Paseo PR合并后自动归档曾中断会话，已只读确认原因；不修改生产服务。
+
+
+## Session 11: GeoRelay 架构优化与首次公开发布
+<!-- trellis-session: v=2 fp=0dbf8527a3f780ff -->
+
+**Date**: 2026-10-03
+**Task**: GeoRelay 架构优化与首次公开发布
+**Branch**: `feat/amap-adapter`
+
+### Summary
+
+已落实独立架构评审的身份刷新、批量预算、字段持久化与法律文件守卫；采用用户确认的 GeoRelay 名称。PR #3 获明确授权后正常合并；main 源码 3e6cbfac755f8811b6de76dbba069a702e1ca82a 的双架构、verify 和 publish 全部通过。两个新包 Public，latest 与固定版本索引一致，四次实际匿名拉取及许可文件逐字核验通过，临时资源清理完成。上游 updater 37045300237 成功且报告 current。未部署生产。
+
+### Main Changes
+
+- 更新双语 README 的公开镜像说明，保留原安装命令与旧包兼容段落。
+
+### Git Commits
+
+| Hash | Message |
+|------|---------|
+| `48a298b` | feat(georelay): harden address refresh and rename published artifacts |
+| `16276f3` | docs(release): record verified GeoRelay image publication |
+
+### Testing
+
+- [OK] PR 68 Python、175 ExUnit 与双架构通过；main 发布 37043924235、四次匿名拉取与法律文件验证成功；updater 37045300237 current。
+
+### Status
+
+[OK] **Completed**
+
+### Next Steps
+
+- 首次发布收尾文档在现有任务分支提交并创建独立 PR，等待用户审阅，不自动合并。生产升级和历史迁移保持独立授权。

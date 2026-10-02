@@ -11,17 +11,17 @@
 - 显式地址刷新写回地点名、道路、门牌与 raw，保持数据库身份和坐标；缓存 TTL 不自动修改 PostgreSQL。
 - 上游 LICENSE/NOTICE/TRADEMARK 变化阻止构建发布，必须人工复核当前随附原文。
 - 修改通知包含日期，发布镜像携带通知；公开文档说明备份、已有地址和刷新范围，不引用内部验收。
-- 新品牌或书面授权等待用户选择；不擅自删除/隐藏旧镜像或改生产。
+- 采用用户确认的 GeoRelay 名称；不删除/隐藏旧镜像或改生产。
 - 保持 stdlib sidecar、源码小补丁、固定稳定 release、双架构和正常 PR 流程。
 
 ## Acceptance Criteria
 
-- [ ] 正/负混合及全正 lookup 不访问未知正身份，实际 Locations.refresh_addresses 测试通过。
-- [ ] 50条带延迟高德/百度冷批次在预算内完成，超预算明确失败；OSM串行限流保留。
-- [ ] 地址字段持久化刷新集成测试覆盖 name/road/house_number/raw，身份与坐标不变。
-- [ ] 法律文件变化或缺失失败关闭，无变更通过；所有发布路径共享同一校验。
-- [ ] 双语文档、备份命令和修改通知符合实际行为。
-- [ ] Python、ExUnit、补丁与镜像检查通过；推送现有GitHub并核实实际checks。
+- [x] 正/负混合及全正 lookup 不访问未知正身份，实际 Locations.refresh_addresses 测试通过。
+- [x] 50条带延迟高德/百度冷批次在预算内完成，超预算明确失败；OSM串行限流保留。
+- [x] 地址字段持久化刷新集成测试覆盖 name/road/house_number/raw，身份与坐标不变。
+- [x] 法律文件变化或缺失失败关闭，无变更通过；所有发布路径共享同一校验。
+- [x] 双语文档、备份命令和修改通知符合实际行为。
+- [x] Python、ExUnit、补丁与镜像检查通过；推送现有GitHub并核实实际checks。
 
 ## Notes
 

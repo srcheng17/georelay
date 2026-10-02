@@ -7,5 +7,7 @@
 - [x] python3 -B -m unittest discover -s tests -v；git diff --check；shell语法检查。
 - [x] 固定官方源码prepare，隔离 Docker ExUnit/format及adapter容器检查。
 - [x] 独立check agent复核跨层契约并修复真实问题。
-- [ ] 可审查提交、push、PR，核实双架构verify；不绕过保护，不强推。
-- [ ] 记录验证与未决事项，再按范围收尾；main新加入AGENTS.md及paseo.json明确要求当前PR独立合并授权。先保留开放PR与实际CI结论，不merge/auto-merge或发布。合并可能触发Paseo自动归档，留续接记录；批准后完成新package公开与匿名拉取验收。
+- [x] 可审查提交、push、PR，核实双架构verify；不绕过保护，不强推。
+- [x] 用户明确授权后合并PR #3；main双架构build、verify、publish全部成功。
+- [x] 两个新package为Public；匿名核对版本/latest索引、四个平台镜像拉取、OCI及法律文件；清理临时检查资源。
+- [x] 记录发布证据，更新双语首次发布说明并收尾；未部署生产。后续文档PR遵循AGENTS.md，保留开放等待独立审阅。
