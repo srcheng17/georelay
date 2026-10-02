@@ -39,14 +39,8 @@ def version(tag):
     return tuple(map(int, tag[1:].split(".")))
 
 
-def check_release(pin, fetch=github_json):
-    release = fetch("/releases/latest")
-    if release.get("draft") is not False or release.get("prerelease") is not False:
-        raise ValueError("Latest release is not a published stable release")
-    tag = release.get("tag_name")
-    if version(tag) < version(pin["tag"]):
-        raise ValueError("Latest release is older than the reviewed pin")
-
+def resolve_tag(tag, fetch=github_json):
+    version(tag)
     obj = fetch("/git/ref/tags/" + tag).get("object", {})
     seen = set()
     for _ in range(5):
@@ -61,6 +55,17 @@ def check_release(pin, fetch=github_json):
         obj = fetch("/git/tags/" + sha).get("object", {})
     else:
         raise ValueError("Release tag exceeded dereference limit")
+    return sha
+
+
+def check_release(pin, fetch=github_json):
+    release = fetch("/releases/latest")
+    if release.get("draft") is not False or release.get("prerelease") is not False:
+        raise ValueError("Latest release is not a published stable release")
+    tag = release.get("tag_name")
+    if version(tag) < version(pin["tag"]):
+        raise ValueError("Latest release is older than the reviewed pin")
+    sha = resolve_tag(tag, fetch)
 
     if tag == pin["tag"] and sha != pin["commit"]:
         raise ValueError("Pinned release tag moved; manual investigation required")
@@ -69,7 +74,7 @@ def check_release(pin, fetch=github_json):
         "current": pin,
         "proposed": {"repository": pin["repository"], "tag": tag, "commit": sha},
         "release_url": "https://github.com/teslamate-org/teslamate/releases/tag/" + tag,
-        "next_step": "Review source and patches, then edit upstream.json and pass all CI gates. No automatic update or deployment.",
+        "next_step": "Report only. The separate updater may create a pin-only PR and dispatch checked version publication; no deployment.",
     }
 
 

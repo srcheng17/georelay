@@ -64,6 +64,30 @@ class ReleaseTests(unittest.TestCase):
             with self.subTest(obj=obj), self.assertRaises(ValueError):
                 release.check_release(self.pin, data.__getitem__)
 
+    def test_tag_resolution_is_shared_bounded_and_rejects_malformed_objects(self):
+        for annotated in (False, True):
+            with self.subTest(annotated=annotated):
+                self.assertEqual(release.resolve_tag("v4.3.0", self.responses(annotated=annotated).__getitem__), "a" * 40)
+        for tag in ("main", "v4.3.0-rc.1", "v04.3.0"):
+            fetch = unittest.mock.Mock()
+            with self.subTest(tag=tag), self.assertRaises(ValueError):
+                release.resolve_tag(tag, fetch)
+            fetch.assert_not_called()
+        for obj in ({"type": "blob", "sha": "b" * 40}, {"type": "commit", "sha": "invalid"}, {}):
+            data = self.responses()
+            data["/git/tags/" + "b" * 40]["object"] = obj
+            with self.subTest(obj=obj), self.assertRaises(ValueError):
+                release.resolve_tag("v4.3.0", data.__getitem__)
+        data = self.responses()
+        for index in range(1, 7):
+            data["/git/tags/" + str(index) * 40] = {"object": {"type": "tag", "sha": str(index + 1) * 40}}
+        data["/git/ref/tags/v4.3.0"]["object"] = {"type": "tag", "sha": "1" * 40}
+        with self.assertRaisesRegex(ValueError, "dereference limit"):
+            release.resolve_tag("v4.3.0", data.__getitem__)
+        data["/git/tags/" + "2" * 40] = {"object": {"type": "tag", "sha": "1" * 40}}
+        with self.assertRaisesRegex(ValueError, "does not resolve"):
+            release.resolve_tag("v4.3.0", data.__getitem__)
+
     def test_api_timeout_is_bounded_and_response_size_is_limited(self):
         response = unittest.mock.MagicMock()
         response.__enter__.return_value.read.return_value = b"{}"
