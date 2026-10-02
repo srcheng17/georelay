@@ -182,7 +182,7 @@ sidecar 的缓存 TTL 不会自动更新 PostgreSQL 里的已有地址。应用�
 1. [Check upstream release](../.github/workflows/upstream-release.yml) 每六小时检查官方稳定 release，也可在 `main` 手动触发。GitHub 定时任务可能延迟，不保证官方发布后立即执行。
 2. 检测到新版本后，自动创建 `upstream/<tag>` 分支，仅修改 `upstream.json`，并打开更新 PR。tag 解引用到完整 commit；草稿、预发布、降级或移动 tag 会停止处理。
 3. 显式触发 [Validate and build](../.github/workflows/ci.yml)。原生 amd64 和 arm64 runner 分别验证 Python、法律文件、严格补丁、ExUnit、镜像架构/许可及非 root 健康检查。上游 LICENSE、NOTICE 或 TRADEMARK.md 缺失或与仓库已复核原文不一致时停止，维护者需审查并更新随附原文后再构建。任一失败都会阻止发布，更新 PR 保留供维护者修复，不自动合并。
-4. 检查全部通过后，从两份已测试镜像产物发布架构标签和多架构版本索引，不重新构建。`main` 的 push 也会自动发布；仍可在 `main` 手动运行并勾选 `publish`。
+4. 检查全部通过后，从两份已测试镜像产物发布架构标签和多架构版本索引，不重新构建。`main` 上影响镜像的 push 也会自动发布；仍可在 `main` 手动运行并勾选 `publish`。
 5. 两个版本索引都发布并验证后，更新两个 `latest` 并回读核对。发布任务串行执行，过期的官方版本或源码任务不能覆盖 `latest`。两个 package 无法原子更新；任何更新或回读失败都会让工作流失败，此时两个 `latest` 可能暂时不一致，应使用已发布的相同固定版本。
 
 两个公开镜像使用同一版本，标签格式为 `<upstream-tag>-georelay-<完整源码commit>`：
@@ -206,6 +206,22 @@ docker compose up -d teslamate georelay-adapter
 首次 package 发布后需设置为 public，并实际验证匿名拉取；公有仓库不代表 package 自动公开。updater 使用工作流的 `contents: write`、`pull-requests: write`、`actions: write` 权限，仓库需允许 Actions 创建 PR；它不会审批或合并 PR。已存在的同版本分支和 PR 会复用，异常 pin 或分支修改会拒绝。候选分支建立后 main 发生变化，也会停止并要求维护者复核，不自动重写该分支；运行中的或已成功的同提交构建不重复触发；失败时仅在 main 和候选分支未变的情况下可重试，源分支前进后需维护者处理该 PR。
 
 镜像的 source/revision/version 标签对应本仓库源码 commit，该 commit 的 `upstream.json` 与补丁可重建该镜像。维护者仍需审查更新 PR 并同步 main；自动发布不会变更用户的 stack、数据库或运行镜像。
+
+### 构建触发与镜像保留
+
+普通任务分支的 push 本身不发布镜像；PR 运行验证。`main` 的 push 根据整次改动判断是否需要镜像：仅 README、`docs/` 使用指南、agent 指令、Trellis 元数据或 `paseo.json` 改动时，只运行 Python 与空白检查，必需的 `verify` 汇总检查仍会完成。运行代码、补丁、`upstream.json`、测试、构建或发布流程、镜像法律文件及 `MODIFICATIONS.md`，以及无法识别的路径，均执行完整双架构构建。删除和重命名也参与判断；无法确定改动范围时执行完整构建。手动 dispatch 始终完整构建，`publish` 默认关闭；上游更新自动化仍显式开启发布。
+
+[镜像保留工作流](../.github/workflows/image-retention.yml) 每周在 `main` 执行清理，手动运行默认只预览。它按两个 package 都具备版本索引和匹配 amd64/arm64 镜像的完整发布组计算，保留最近 10 组、两个 `latest` 及保留索引引用的子镜像。排序依据发布时间，不能只保留十条 registry version 记录，否则会破坏多架构镜像。
+
+清理与发布共用串行锁，先完成两个 package 的清单和依赖验证，再删除旧索引及不再被保留索引引用的子镜像。读取失败、元数据不完整或缺少被引用的镜像时，停止并保持镜像不变。不完整发布、未知标签和未关联的无标签记录保留供维护者复核，因此策略限制正常完整发布历史，并非 registry 所有记录的硬上限。被删除的旧版本或 digest 无法继续从 GHCR 拉取；需要长期保存的版本请提前同步到自己的仓库。
+
+本地只读预览命令：
+
+```sh
+python3 scripts/retain_images.py --repository srcheng17/georelay
+```
+
+读取 package version 清单需要相应权限；清理工作流使用仓库 `GITHUB_TOKEN`，仓库必须拥有这两个 package 的管理员权限，权限不足会停止。脚本默认不删除；只有显式 `--apply` 或手动工作流关闭 `dry_run` 才应用策略。PR 的 push、CI 通过和镜像发布均不构成合并授权，合并必须由维护者明确决定。
 
 ## 来源与许可
 

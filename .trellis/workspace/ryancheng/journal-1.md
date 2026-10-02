@@ -302,6 +302,40 @@ PR #2 正常合并，main CI 37034259606 双架构、verify、publish全部成�
 - Paseo PR合并后自动归档曾中断会话，已只读确认原因；不修改生产服务。
 
 
+## Session 10: Optimize image build and retention lifecycle
+<!-- trellis-session: v=2 fp=b61ef1b66200d403 -->
+
+**Date**: 2026-10-03
+**Task**: Optimize image build and retention lifecycle
+**Branch**: `feat/image-lifecycle`
+
+### Summary
+
+Added metadata-only CI gating with required verify and dual-architecture validation preserved. Added preview-first paired GHCR retention for latest and ten complete releases. Full-scope review and 78 tests passed; native CI will be verified on the open PR. No live deletion, deployment or merge.
+
+### Main Changes
+
+- CI gating and conservative grouped GHCR retention with offline regression coverage
+
+### Git Commits
+
+| Hash | Message |
+|------|---------|
+| `b9e524c9f44b46578bd9c8e05002a823e992d8ac` | ci(release): optimize image builds and retention |
+
+### Testing
+
+- [OK] 78 Python tests, actionlint, compilation, shell syntax, whitespace and documentation links passed
+
+### Status
+
+[OK] **Completed**
+
+### Next Steps
+
+- Inspect native PR checks; await explicit user instruction before merging
+
+
 ## Session 11: GeoRelay 架构优化与首次公开发布
 <!-- trellis-session: v=2 fp=0dbf8527a3f780ff -->
 
@@ -335,3 +369,64 @@ PR #2 正常合并，main CI 37034259606 双架构、verify、publish全部成�
 ### Next Steps
 
 - 首次发布收尾文档在现有任务分支提交并创建独立 PR，等待用户审阅，不自动合并。生产升级和历史迁移保持独立授权。
+
+
+## Session 12: Verify GeoRelay image lifecycle integration
+<!-- trellis-session: v=2 fp=81419be8b89b9f2d -->
+
+**Date**: 2026-10-03
+**Task**: Verify GeoRelay image lifecycle integration
+**Branch**: `feat/image-lifecycle`
+
+### Summary
+
+Synced concurrent main 3e6cbfa into feat/image-lifecycle, aligned retention with GeoRelay publisher convention, and preserved legal input builds. 87 tests and full-scope review passed. Anonymous public registry preview verified one paired release; no live DELETE or deployment. Final PR remains for explicit user review and merge authorization.
+
+### Git Commits
+
+| Hash | Message |
+|------|---------|
+| `98e83d80602f98dcaa820d894fce0f063a79e63b` | ci(release): align lifecycle with GeoRelay publisher |
+
+### Testing
+
+- [OK] 87 tests and full-scope review passed; actionlint, compilation, shell syntax and whitespace passed
+
+### Status
+
+[OK] **Completed**
+
+### Next Steps
+
+- Verify native PR CI and leave PR open for user review
+
+
+## Session 13: Verify image lifecycle PR integration
+<!-- trellis-session: v=2 fp=6058dff4407dd8d0 -->
+
+**Date**: 2026-10-03
+**Task**: Verify image lifecycle PR integration
+**Branch**: `feat/image-lifecycle`
+
+### Summary
+
+Integrated docs and Paseo-only main advances into feat/image-lifecycle, preserving full session records and refined settings. Five isolated timing reproductions and the independent 87-test full suite passed without runtime/test changes. Initial amd64 CI timing failure is recorded; final native PR checks remain pending. No live image deletion, deployment or merge into main.
+
+### Git Commits
+
+| Hash | Message |
+|------|---------|
+| `8296b19` | chore(ci): sync main and preserve complete session records |
+| `714330c` | chore(paseo): sync refined project metadata from main |
+
+### Testing
+
+- [OK] 87 tests passed in 46.036 seconds; full-scope review and static checks passed
+
+### Status
+
+[OK] **Completed**
+
+### Next Steps
+
+- Verify latest native amd64 and arm64 PR checks; leave PR open without auto-merge for user review

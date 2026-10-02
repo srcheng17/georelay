@@ -19,7 +19,28 @@ concurrency:
   cancel-in-progress: false
 
 jobs:
+  checks:
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    outputs:
+      image_required: ${{ steps.changes.outputs.image_required }}
+    steps:
+      - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4
+        with:
+          fetch-depth: 0
+          persist-credentials: false
+      - name: Decide whether images are required
+        id: changes
+        run: python3 scripts/ci_changes.py
+      - name: Whitespace checks
+        run: git diff --check
+      - name: Python checks for metadata-only changes
+        if: steps.changes.outputs.image_required == 'false'
+        run: python3 -m unittest discover -s tests -v
+
   build:
+    needs: checks
+    if: needs.checks.outputs.image_required == 'true'
     strategy:
       fail-fast: false
       matrix:
@@ -41,9 +62,7 @@ jobs:
           EXPECTED_MACHINE: ${{ matrix.machine }}
         run: test "$(uname -m)" = "$EXPECTED_MACHINE"
       - name: Python checks
-        run: |
-          python3 -m unittest discover -s tests -v
-          git diff --check
+        run: python3 -m unittest discover -s tests -v
       - name: Check fixed upstream and apply every patch
         run: python3 scripts/prepare_upstream.py "$RUNNER_TEMP/teslamate-upstream"
       - name: Upstream contract tests in isolated containers
@@ -100,19 +119,25 @@ jobs:
 
   # Keep the single required check name for main's branch protection.
   verify:
-    needs: build
+    needs: [checks, build]
     if: always()
     runs-on: ubuntu-latest
     timeout-minutes: 5
     steps:
-      - name: Require every architecture to pass
+      - name: Require checks and the selected image validation
         env:
+          CHECKS_RESULT: ${{ needs.checks.result }}
+          IMAGE_REQUIRED: ${{ needs.checks.outputs.image_required }}
           BUILD_RESULT: ${{ needs.build.result }}
-        run: test "$BUILD_RESULT" = success
+        run: |
+          case "$CHECKS_RESULT:$IMAGE_REQUIRED:$BUILD_RESULT" in
+            success:true:success|success:false:skipped) exit 0 ;;
+            *) exit 1 ;;
+          esac
 
   publish:
-    needs: [build, verify]
-    if: (github.event_name == 'push' && github.ref == 'refs/heads/main') || (github.event_name == 'workflow_dispatch' && inputs.publish)
+    needs: [checks, build, verify]
+    if: needs.checks.outputs.image_required == 'true' && needs.build.result == 'success' && needs.verify.result == 'success' && ((github.event_name == 'push' && github.ref == 'refs/heads/main') || (github.event_name == 'workflow_dispatch' && inputs.publish))
     concurrency:
       group: ghcr-publication-${{ github.repository }}
       cancel-in-progress: false

@@ -1,0 +1,43 @@
+name: Retain published images
+
+on:
+  schedule:
+    - cron: '43 3 * * 0'
+  workflow_dispatch:
+    inputs:
+      dry_run:
+        description: Preview only (no image deletion)
+        type: boolean
+        default: true
+
+permissions:
+  contents: read
+  packages: write
+
+jobs:
+  retain:
+    if: github.ref == 'refs/heads/main'
+    concurrency:
+      group: ghcr-publication-${{ github.repository }}
+      cancel-in-progress: false
+    runs-on: ubuntu-latest
+    timeout-minutes: 30
+    steps:
+      - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4
+        with:
+          persist-credentials: false
+      - name: Protect latest and the ten newest complete releases
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+          APPLY: ${{ github.event_name == 'schedule' || !inputs.dry_run }}
+        run: |
+          args=()
+          if [[ $APPLY == true ]]; then args+=(--apply); fi
+          python3 scripts/retain_images.py "${args[@]}" --output "$RUNNER_TEMP/image-retention-report.json"
+      - uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02 # v4
+        with:
+          name: image-retention-report
+          path: ${{ runner.temp }}/image-retention-report.json
+          if-no-files-found: error
+          retention-days: 14
