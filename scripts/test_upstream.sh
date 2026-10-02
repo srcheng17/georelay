@@ -12,9 +12,10 @@ python3 - "$root" "$source_dir" <<'PY'
 from pathlib import Path
 import sys
 sys.path.insert(0, str(Path(sys.argv[1]) / "scripts"))
-from prepare_upstream import git, load_pin
+from prepare_upstream import check_legal_files, git, load_pin
 if git(sys.argv[2], "rev-parse", "HEAD") != load_pin()["commit"]:
     raise SystemExit("incorrect upstream commit")
+check_legal_files(sys.argv[2])
 patches = sorted((Path(sys.argv[1]) / "patches").glob("*.patch"))
 if not patches:
     raise SystemExit("no upstream patch found")
@@ -51,6 +52,27 @@ docker run --rm --name "$name-elixir" --network "$name" \
     mix local.rebar --force
     mix deps.get
     mix compile --warnings-as-errors
-    mix format --check-formatted lib/teslamate/http.ex lib/teslamate/locations/geocoder.ex test/teslamate/http_test.exs test/teslamate/locations/geocoder_adapter_test.exs
-    mix test --warnings-as-errors test/teslamate/http_test.exs test/teslamate/locations/geocoder_test.exs test/teslamate/locations/geocoder_adapter_test.exs
+    mix format --check-formatted \
+      lib/teslamate/http.ex lib/teslamate/locations.ex lib/teslamate/locations/geocoder.ex \
+      lib/teslamate_web.ex lib/teslamate_web/templates/layout/root.html.heex \
+      lib/teslamate_web/live/settings_live/index.html.heex \
+      lib/teslamate_web/live/signin_live/index.html.heex \
+      lib/teslamate_web/live/import_live/index.html.heex \
+      lib/teslamate_web/live/car_live/index.html.heex \
+      test/teslamate/http_test.exs test/teslamate/settings_test.exs \
+      test/teslamate/locations/geocoder_adapter_test.exs \
+      test/teslamate/locations/addresses_adapter_test.exs \
+      test/teslamate_web/controllers/branding_controller_test.exs \
+      test/teslamate_web/controllers/drive_controller_test.exs \
+      test/teslamate_web/live/car_index_live_test.exs test/teslamate_web/live/settings_test.exs
+    mix test --warnings-as-errors \
+      test/teslamate/http_test.exs test/teslamate/settings_test.exs \
+      test/teslamate/locations/addresses_test.exs \
+      test/teslamate/locations/geocoder_test.exs \
+      test/teslamate/locations/geocoder_adapter_test.exs \
+      test/teslamate/locations/addresses_adapter_test.exs \
+      test/teslamate_web/controllers/branding_controller_test.exs \
+      test/teslamate_web/controllers/legal_controller_test.exs \
+      test/teslamate_web/controllers/drive_controller_test.exs \
+      test/teslamate_web/live/car_index_live_test.exs test/teslamate_web/live/settings_test.exs
   '
