@@ -38,3 +38,16 @@ Main advanced from add92b0 to 3e6cbfa while this isolated optimization was being
 - Fresh full-scope integration review: no findings/fixes; independent 87-test suite passed (45.766 seconds), actionlint/whitespace/compile/bash checks passed.
 - Canonical GeoRelay retention CLI was also run in default preview mode and stopped safely without a REST plan under the limited local credential. No live apply.
 - Final native PR CI will be reported on the PR.
+
+## PR #6 and latest main integration
+
+- PR: https://github.com/srcheng17/georelay/pull/6; feat/image-lifecycle into main; open, auto-merge disabled.
+- Initial native PR run 37046507508: checks and arm64 full validation succeeded; amd64 failed only the inherited fifty-cold-mainland-lookup test (baidu) at its one-second test deadline; verify correctly failed and publish was skipped. The actual failure is being investigated, not described as passed.
+- Concurrent main advanced to d581c24 through documentation and architecture-task archival only. Synced it into the feature branch, retaining both tasks and every journal session. Git's automatic journal merge interleaved sections; restored complete chronological sections from their source commits.
+- No runtime or adapter-test changes made during this integration. Primary checkout remains untouched; no live deletion, deployment or main/PR merge.
+
+- Evidence-first timeout investigation: original adapter/test blobs match origin/main. Five isolated repetitions passed, retaining the unchanged one-second budget, 50 calls, peak concurrency >1 and <=4, and ordered identity assertions. AMap elapsed 0.605–0.644 s; Baidu 0.620–0.651 s. These macOS/Python 3.13/arm64 results do not reproduce or diagnose the amd64 runner timing. No runtime/test modification is justified by one runner failure; fresh native validation will test the synced branch.
+
+- Main advanced once more to eb63e20 with only Paseo commit/PR metadata refinements. Imported those exact settings as well; retained imperative scoped commits, 72-character limit, Summary/Test plan and explicit manual merge policy. No lifecycle-specific settings rollback.
+- Fresh full-scope reviewer: all 87 tests passed (46.036 s), including both fifty-cold-mainland subtests, with no timing-budget changes. Static scope/spec, actionlint, compilation, shell/whitespace checks and documentation links passed. Journal integrity confirmed: all main sessions preserved verbatim, complete chronological 1–12, unique fingerprints and accurate index.
+- Spec review: existing CI/retention executable contracts remain current; this docs/settings-only integration introduces no new runtime or API contract.
