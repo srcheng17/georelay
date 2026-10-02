@@ -3,7 +3,7 @@
   "name": "public-readme",
   "title": "公开仓库与 README 整理",
   "description": "用户授权公开现有仓库、落实main分支保护，并在官方README基础上专业呈现高德新增能力；保留当前feature分支，不合并或部署。",
-  "status": "in_progress",
+  "status": "completed",
   "dev_type": null,
   "scope": null,
   "package": null,
@@ -11,7 +11,7 @@
   "creator": "ryancheng",
   "assignee": "ryancheng",
   "createdAt": "2026-10-02",
-  "completedAt": null,
+  "completedAt": "2026-10-02",
   "branch": "feat/amap-adapter",
   "base_branch": "main",
   "worktree_path": null,
@@ -20,7 +20,12 @@
   "subtasks": [],
   "children": [],
   "parent": null,
-  "relatedFiles": ["README.md", "docs/AMAP.md", "MODIFICATIONS.md", ".trellis/spec/backend/quality-guidelines.md"],
+  "relatedFiles": [
+    "README.md",
+    "docs/AMAP.md",
+    "MODIFICATIONS.md",
+    ".trellis/spec/backend/quality-guidelines.md"
+  ],
   "notes": "",
   "meta": {}
 }
