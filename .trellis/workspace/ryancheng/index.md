@@ -8,7 +8,7 @@
 
 <!-- @@@auto:current-status -->
 - **Active File**: `journal-1.md`
-- **Total Sessions**: 2
+- **Total Sessions**: 3
 - **Last Active**: 2026-10-02
 <!-- @@@/auto:current-status -->
 
@@ -19,7 +19,7 @@
 <!-- @@@auto:active-documents -->
 | File | Lines | Status |
 |------|-------|--------|
-| `journal-1.md` | ~72 | Active |
+| `journal-1.md` | ~107 | Active |
 <!-- @@@/auto:active-documents -->
 
 ---
@@ -29,6 +29,7 @@
 <!-- @@@auto:session-history -->
 | # | Date | Title | Commits | Branch |
 |---|------|-------|---------|--------|
+| 3 | 2026-10-02 | 真实地址样本核对与 AOI/POI 名称修复 | `99b67ea` | `feat/amap-adapter` |
 | 2 | 2026-10-02 | 高德与 OSM 真实 Key 隔离联调 | `9c577a6` | `feat/amap-adapter` |
 | 1 | 2026-10-02 | AMap and OSM adapter MVP | `f09ecd0`, `0b2348d` | `feat/amap-adapter` |
 <!-- @@@/auto:session-history -->

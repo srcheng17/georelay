@@ -70,3 +70,38 @@ Implemented and verified mainland AMap / overseas OSM sidecar and fixed-release 
 ### Next Steps
 
 - 现有PR待人工审查；生产迁移与历史导入仍为独立工作
+
+
+## Session 3: 真实地址样本核对与 AOI/POI 名称修复
+<!-- trellis-session: v=2 fp=57c9e72bdb5b5b54 -->
+
+**Date**: 2026-10-02
+**Task**: 真实地址样本核对与 AOI/POI 名称修复
+**Branch**: `feat/amap-adapter`
+
+### Summary
+
+生产只读样本发现基础响应丢失地点名，改详细请求及AOI/POI优先映射；隔离复核恢复同点原名，未修改生产。
+
+### Main Changes
+
+- 最小名称修复、虚构回归、契约与脱敏验收同步
+
+### Git Commits
+
+| Hash | Message |
+|------|---------|
+| `99b67ea` | fix: preserve AMap area and place names |
+
+### Testing
+
+- [OK] 32项Python测试与独立复核通过，回归先红后绿
+- [OK] 真实样本23项reverse及31项断言通过，同点旧高德17/17名称一致；临时资源与Key已清理
+
+### Status
+
+[OK] **Completed**
+
+### Next Steps
+
+- 历史OSM字段差异和旧正身份迁移仍须独立评估，未部署
