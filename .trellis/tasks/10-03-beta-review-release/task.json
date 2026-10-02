@@ -15,14 +15,14 @@
   "branch": "feat/beta-review-release",
   "base_branch": "main",
   "worktree_path": null,
-  "commit": "4dce3a8",
-  "pr_url": "https://github.com/srcheng17/georelay/pull/10",
+  "commit": "9fa79ae",
+  "pr_url": "https://github.com/srcheng17/georelay/pull/11",
   "subtasks": [],
   "children": [
     "10-03-main-image-smoke"
   ],
   "parent": null,
   "relatedFiles": [],
-  "notes": "用户明确授权合并验证，本次范围仅 GHCR。PR10 head4dce3a8 云端 amd64/arm64 主应用真实 HTTP200、105迁移、核心表和编译地址通过，adapter各34/34，verify/publish成功；beta双索引/OCI/alias通过且latest未变，control只读candidate_ready。已普通expected-head merge为5727c65；main正式run37072746968进行中。BARK_URL已安全配置，临时failure分支run37072800085与同任务late-head回归候选用于真实通知/默认Actions自动合并dispatch验收；不更新运行容器，不绕过保护。",
+  "notes": "用户明确授权本任务合并验证及未来条件自动合并，范围仅GHCR。PR10已普通expected-head merge为5727c65，main正式run37072746968双架构启动/105迁移/地址/adapter34及发布通过；两个正式OCI索引/latest精确一致。BARK_URL已安全配置，早期失败run37072800085与PR11失败37073109247均由可信main控制器准确通知，sender一次HTTP200/code200成功。临时failure分支已删除。PR11因正向50批量fixture1s吞吐假设失败，发布/merge/dispatch均阻断；仅修fixture为5s并保留peak并发/完整结果/global失败deadline。Linux34/34与串行mutation拒绝通过，新head云端与默认Actions合并dispatch待验收。不更新运行容器，不绕过保护。",
   "meta": {}
 }

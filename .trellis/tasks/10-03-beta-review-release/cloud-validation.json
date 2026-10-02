@@ -83,6 +83,23 @@
       },
       "verify": "success",
       "publish": "success"
+    },
+    {
+      "id": 37073109247,
+      "head": "9fa79ae813f68c3a9ae4804f5b455ed03a08e032",
+      "conclusion": "failure",
+      "build-arm64": {
+        "startup": "success",
+        "migrations": 105,
+        "adapter_tests": 34
+      },
+      "build-amd64": {
+        "startup": "skipped",
+        "adapter_tests": "33/34; fifty cold mainland lookup timed out at 1s success fixture budget on baidu subtest"
+      },
+      "verify": "failure",
+      "publish": "skipped",
+      "cause": "positive concurrency fixture imposes 1s runner throughput assumption including SQLite writes; production default lookup budget is 20s"
     }
   ],
   "linux_fixture_fix": {
@@ -134,6 +151,70 @@
     "branch": "qa/georelay-bark-failure-37071951401",
     "sha": "3a52ad71d39e59525e760867ca7075a985c6e7a5",
     "run": 37072800085,
-    "status": "in_progress; intentionally reproduces original Linux fixture failure before images are built"
+    "status": "passed",
+    "source_conclusion": "failure",
+    "artifact_count": 0,
+    "publish": "skipped",
+    "controller_run": 37073005011,
+    "controller_reason": "beta_validation",
+    "notify": true,
+    "dry_run": "passed",
+    "sender_status": "sent",
+    "sender_attempts": 1,
+    "http_status": 200,
+    "response_code": "200 verified by sender",
+    "phone_receipt": "not independently verified",
+    "temporary_branch": "deleted; absence verified"
+  },
+  "main_runs": [
+    {
+      "id": 37072746968,
+      "head": "5727c65a9eda47869bfea1b79679e6899ce829a5",
+      "event": "push",
+      "conclusion": "success",
+      "build-amd64": {
+        "startup": "success",
+        "migrations": 105,
+        "adapter_tests": 34
+      },
+      "build-arm64": {
+        "startup": "success",
+        "migrations": 105,
+        "adapter_tests": 34
+      },
+      "verify": "success",
+      "publish": "success",
+      "registry": {
+        "version": "v4.3.0-georelay-5727c65a9eda47869bfea1b79679e6899ce829a5",
+        "georelay": "sha256:de0a17ac232888af181fc73c3133f5b9db4f60c53d8ecedc56830cdf73dc40e0",
+        "georelay-adapter": "sha256:6e11bc8dc612234033093a65fa6a029559bcc8e6d770066e1221ba9fd30e6405",
+        "latest": "both exact version indexes; amd64/arm64 and OCI/digests passed"
+      }
+    }
+  ],
+  "conditional_candidate": {
+    "pr": 11,
+    "head": "9fa79ae813f68c3a9ae4804f5b455ed03a08e032",
+    "beta_run": 37073109247,
+    "status": "failed; no merge/dispatch",
+    "controller_run": 37073595194,
+    "notify": true,
+    "bark": {
+      "status": "sent",
+      "attempts": 1,
+      "http_status": 200
+    }
+  },
+  "batch_fixture_fix": {
+    "files": [
+      "tests/test_adapter.py"
+    ],
+    "root_cause": "1s positive batch fixture conflates SQLite/scheduler throughput with functional concurrency; production default remains 20s",
+    "fix": "5s bounded positive-fixture budget; remove serial-sleep microbenchmark; keep full fifty results/order/identity/coordinates/providers and 1<peak<=4; independent global-deadline failure and queue-cancel tests preserved",
+    "linux_arm64_before": "controlled 30ms lookup connection delay reproduces original 1s 504 in both providers, 2.021s total",
+    "linux_arm64_after": "same delay, all positive assertions passed, 3.125s total",
+    "serialized_mutation": "single worker returns fifty results within bounded budget but both providers correctly fail peak>1; 4.689s total",
+    "linux_arm64_packaged_suite": "34/34 in 13.603s; /app module verified; network none; container removed",
+    "review_focused": "batch/global-deadline/queue-cancel/slow-drip 5/5"
   }
 }
