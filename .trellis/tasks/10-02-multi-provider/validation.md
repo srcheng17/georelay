@@ -25,4 +25,13 @@
 
 高德海外域仅验证固定 host、WGS84 与 cache 隔离的模拟路径；本次个人国内 Key 没有转发海外域，不声称真实海外权限通过。AMap/Baidu 使用服务默认语言；地区确认仍有矩形/行政字段启发式限制，公共地标样本不代表全境覆盖。
 
-最终 PR/双架构 CI 与镜像发布证据待核对后补充。
+## 2026-10-03 CI 与发布续验证（Asia/Shanghai）
+
+[PR #1](https://github.com/srcheng17/teslamate/pull/1) 已按保护流程合并，镜像源码 commit 为 `8f4efa1df503d5a25540d9185fb19ddcbd949d32`。共同发布版本为 `v4.3.0-amap-8f4efa1df503d5a25540d9185fb19ddcbd949d32`。
+
+- [PR CI 37029365291](https://github.com/srcheng17/teslamate/actions/runs/37029365291)：amd64、arm64 build 与 verify 成功，publish 按 PR 事件条件跳过。
+- [main CI 37029960665](https://github.com/srcheng17/teslamate/actions/runs/37029960665)：两个架构 build、verify、publish 全部成功；两个 package 的浏览器页面均确认 Public。
+- 两版本索引恰含 `linux/amd64`、`linux/arm64`；四个 child manifest 的 OCI source/revision/version 均一致，空临时 Docker config 的四次实际匿名拉取与本地架构/标签回读全部通过。两个索引及四个 child digest 见[镜像发布验收](../10-02-images-release/validation.md)。验证用镜像 references 已清理。
+- [updater 37030399601](https://github.com/srcheng17/teslamate/actions/runs/37030399601) 成功，artifact 为 `status=current`，官方 `v4.3.0` pin 保持不变。未来新稳定版的更新 PR 和自动发布路径由模拟测试证明，本次实际 updater 是相同版本 noop。
+
+未部署生产，未修改生产数据库或 Dockhand stack；高德海外权限仍仅有上述模拟验证范围。

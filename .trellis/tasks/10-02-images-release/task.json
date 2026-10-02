@@ -15,7 +15,7 @@
   "branch": "feat/amap-adapter",
   "base_branch": "main",
   "worktree_path": null,
-  "commit": null,
+  "commit": "8f4efa1df503d5a25540d9185fb19ddcbd949d32",
   "pr_url": "https://github.com/srcheng17/teslamate/pull/1",
   "subtasks": [],
   "children": [],
