@@ -81,3 +81,7 @@ The final shared prepare path uses the address-only official source and two stri
 - CI calls `scripts/test_main_image.sh` before `docker save` and upload; the script retains the main image default ENTRYPOINT/CMD, starts a fresh PostgreSQL on an internal temporary network without host ports or production mounts, and only returns success after HTTP/SQL/compiled-address checks and resource cleanup. Failure runs demonstrate that tests failing earlier prevent publication; they are not claimed as main startup successes.
 
 Parent cloud acceptance details and fixed digests: `../10-03-beta-review-release/cloud-validation.json`. The parent still verifies conditional default-token merge/dispatch; running production containers remain outside scope.
+
+Final native-protection candidate172f855 beta37077079430 repeated the actual default-entrypoint startup on native amd64/arm64: login HTTP200, 105 migrations, core tables and compiled address checks. Both packaged adapter suites and verify/publication succeeded. PR11 normally installed this exact tested candidate at main02c4262; main37077752055 remains pending and is not reported as completed here.
+
+Installer main run37077752055 at02c4262 completed successfully with both native main runtime and packaged adapter suites, verify and publication. Both stable/latest indexes and child/config/OCI digests were independently verified. Subsequent automatic candidate/main runs are final integration acceptance, not required to replace this actual main runtime evidence.

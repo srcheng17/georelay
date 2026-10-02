@@ -117,6 +117,23 @@
       },
       "verify": "success",
       "publish": "success"
+    },
+    {
+      "id": 37077079430,
+      "head": "172f85576f5611d4c3762800e69a3d8563988a20",
+      "conclusion": "success",
+      "build-amd64": {
+        "startup": "success",
+        "migrations": 105,
+        "adapter_tests": 34
+      },
+      "build-arm64": {
+        "startup": "success",
+        "migrations": 105,
+        "adapter_tests": 34
+      },
+      "verify": "success",
+      "publish": "success"
     }
   ],
   "linux_fixture_fix": {
@@ -207,6 +224,30 @@
         "georelay-adapter": "sha256:6e11bc8dc612234033093a65fa6a029559bcc8e6d770066e1221ba9fd30e6405",
         "latest": "both exact version indexes; amd64/arm64 and OCI/digests passed"
       }
+    },
+    {
+      "id": 37077752055,
+      "head": "02c426233bd972506f5149810afa96fab6388fb3",
+      "event": "push",
+      "conclusion": "success",
+      "build-amd64": {
+        "startup": "success",
+        "migrations": 105,
+        "adapter_tests": 34
+      },
+      "build-arm64": {
+        "startup": "success",
+        "migrations": 105,
+        "adapter_tests": 34
+      },
+      "verify": "success",
+      "publish": "success",
+      "registry": {
+        "version": "v4.3.0-georelay-02c426233bd972506f5149810afa96fab6388fb3",
+        "georelay": "sha256:09ff8c7812d26ca64b6bf6014635db7cf068953d046caf3d28521724139ca442",
+        "georelay-adapter": "sha256:711c5a2fbe744a521a3d4e0053204befdbdea28f0dbf6c57811264e6609c4b17",
+        "latest": "both exact version indexes; amd64/arm64 and child/config/OCI/digests passed"
+      }
     }
   ],
   "batch_fixture_fix": {
@@ -276,5 +317,48 @@
     "owner_live_readback": "main strict=true/enforce_admins=true/verify app15368; settings unchanged",
     "decision": "use accessible branch protection summary and ordinary expected-head merge; existing strict checks are enforced atomically by GitHub; no administrator credential or bypass",
     "temporary_resources": "remote/local branch deleted; worktree removed; absence verified"
+  },
+  "native_protection_fix": {
+    "head": "172f85576f5611d4c3762800e69a3d8563988a20",
+    "beta_run": 37077079430,
+    "tests": "controller+Bark21/21; actionlint v1.7.12 -shellcheck=; AST/JSON/diff passed",
+    "registry": {
+      "version": "v4.3.0-georelay-beta-172f85576f5611d4c3762800e69a3d8563988a20",
+      "georelay": "sha256:59f900ac090c06ce0647311a910ab2dac0553d8b59b05d72a252afa8a38ed92b",
+      "georelay-adapter": "sha256:78e76f45457d2d0890796d2013c9fa00845ccd5728b71839bf4f2ab7018a6fe6",
+      "alias": "beta-pr-11 exact indexes",
+      "latest": "unchanged main5727 indexes; child/config/OCI/two arches passed"
+    },
+    "install_merge": {
+      "pr": 11,
+      "head": "172f85576f5611d4c3762800e69a3d8563988a20",
+      "merge_sha": "02c426233bd972506f5149810afa96fab6388fb3",
+      "method": "ordinary expected-head merge under existing explicit authorization; user srcheng17; no bypass or auto-merge switch",
+      "main_run": 37077752055,
+      "main_result": "success; both native startups/105 migrations/adapter34; stable indexes and latest verified"
+    },
+    "default_token_auto_merge_dispatch": "pending subsequent exact-head candidate; installer merge is not automatic acceptance",
+    "old_controller": {
+      "run": 37077616554,
+      "status": "failed",
+      "reason": "branch_protection",
+      "notify": true,
+      "bark": {
+        "status": "sent",
+        "attempts": 1,
+        "http_status": 200
+      },
+      "merge_dispatch": "none; old trusted main could not install its own correction"
+    }
+  },
+  "late_base_regression": {
+    "files": [
+      "tests/test_release_control.py"
+    ],
+    "scenario": "main moves after final candidate read/protection summary; PR head stays tested SHA; ordinary merge fixture enforces existing server strict",
+    "before": "without strict fixture rejection, regression failed because controller dispatched main",
+    "after": "single exact-head PUT, PR open/unmerged, no dispatch, merge-stage failure notification; controller+Bark22/22; AST/JSON/diff passed",
+    "production_changes": "none",
+    "live_default_token_acceptance": "pending"
   }
 }

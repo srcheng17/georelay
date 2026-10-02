@@ -49,6 +49,8 @@ class Fixture:
         self.documents = {}
         self.fail, self.merge_result, self.changed_on_last_read = None, True, False
         self.changed_after_protection_read = False
+        self.changed_main_after_protection_read = False
+        self.main_sha = MAIN
         self.pull_reads = 0
         self.images()
 
@@ -95,9 +97,11 @@ class Fixture:
         if path == "/branches/main":
             if self.changed_after_protection_read:
                 self.pull["head"]["sha"] = "d" * 40
+            if self.changed_main_after_protection_read:
+                self.main_sha = "e" * 40
             return copy.deepcopy(self.branch_summary)
         if path == "/git/ref/heads/main":
-            return {"object": {"type": "commit", "sha": MAIN}}
+            return {"object": {"type": "commit", "sha": self.main_sha}}
         if path == "/git/ref/heads/feature":
             return {"object": {"type": "commit", "sha": HEAD}}
         if path == "/compare/" + MAIN + "..." + HEAD:
@@ -105,6 +109,8 @@ class Fixture:
         if method == "PUT" and path == "/pulls/7/merge":
             if payload["sha"] != self.pull["head"]["sha"]:
                 raise RuntimeError("Expected head mismatch")
+            if self.main_sha != MAIN:
+                raise RuntimeError("Strict main freshness check failed")
             if self.merge_result:
                 self.pull.update(state="closed", merged=True, merge_commit_sha=MERGED)
             if self.fail == "lost_merge_response":
@@ -244,6 +250,22 @@ class ReleaseControlTests(unittest.TestCase):
         result = fixture.control()
         self.assertEqual(fixture.writes(), [("PUT", "/pulls/7/merge", {"sha": HEAD, "merge_method": "merge"})])
         self.assertEqual(fixture.pull["head"]["sha"], "d" * 40)
+        self.assertEqual(fixture.pull["state"], "open")
+        self.assertFalse(fixture.pull["merged"])
+        self.assertIsNone(fixture.pull["merge_commit_sha"])
+        self.assertEqual(result["status"], "failed")
+        self.assertEqual(result["reason"], "merge")
+        self.assertTrue(result["notify"])
+        self.assertEqual(result["notification"]["stage"], "merge")
+        self.assertNotIn("merged_sha", result)
+
+    def test_main_change_after_protection_read_rejected_by_server_strict(self):
+        fixture = Fixture()
+        fixture.changed_main_after_protection_read = True
+        result = fixture.control()
+        self.assertEqual(fixture.writes(), [("PUT", "/pulls/7/merge", {"sha": HEAD, "merge_method": "merge"})])
+        self.assertEqual(fixture.main_sha, "e" * 40)
+        self.assertEqual(fixture.pull["head"]["sha"], HEAD)
         self.assertEqual(fixture.pull["state"], "open")
         self.assertFalse(fixture.pull["merged"])
         self.assertIsNone(fixture.pull["merge_commit_sha"])

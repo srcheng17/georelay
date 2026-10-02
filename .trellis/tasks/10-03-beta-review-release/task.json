@@ -15,7 +15,7 @@
   "branch": "feat/beta-review-release",
   "base_branch": "main",
   "worktree_path": null,
-  "commit": "9fa79ae",
+  "commit": "172f855",
   "pr_url": "https://github.com/srcheng17/georelay/pull/11",
   "subtasks": [],
   "children": [
@@ -23,6 +23,6 @@
   ],
   "parent": null,
   "relatedFiles": [],
-  "notes": "用户明确授权本任务合并验证及未来条件自动合并，范围仅GHCR。PR10/main5727正式run37072746968双架构实际启动/105迁移/adapter34与正式latest回读成功。BARK_URL安全配置，多次真实失败准确通知，临时failure/protection probe分支及目录已清理。PR11 c12beta37074314019双架构/verify/pub/索引/alias全部成功，但默认token Graph保护读取FORBIDDEN而阻止merge/dispatch。只读同权限探针37076000025证明GET branches/main摘要可见，strict详情403/Graph FORBIDDEN；现有main strict/admin/verify owner读回仍有效，设置未改。最小修正用公开protected/enabled/everyone/verify15368 gate与GitHub普通expected-head merge原子执行server strict，不新增admin凭据或bypass。控制器15/15，本次修正云端beta/可信main安装/默认token实际merge dispatch待验收，不更新运行容器。",
+  "notes": "用户明确授权本任务合并验证及未来条件自动合并，范围仅GHCR。PR10/main5727正式run37072746968双架构实际启动/105迁移/adapter34与正式latest回读成功。BARK_URL安全配置，多次真实失败准确通知，临时failure/protection probe分支及目录已清理。PR11 c12beta37074314019双架构/verify/pub/索引/alias全部成功，但默认token Graph保护读取FORBIDDEN而阻止merge/dispatch。只读同权限探针37076000025证明GET branches/main摘要可见，strict详情403/Graph FORBIDDEN；现有main strict/admin/verify owner读回仍有效，设置未改。最小修正用公开protected/enabled/everyone/verify15368 gate与GitHub普通expected-head merge原子执行server strict，不新增admin凭据或bypass。控制器15/15，本次修正云端beta/可信main安装/默认token实际merge dispatch待验收，不更新运行容器。 PR11新head172f855云端beta37077079430双架构真实startup/105迁移/address/adapter34与registry全部通过；普通expected-head merge安装修复至main02c4262，正式run37077752055待验收。默认token自动merge/dispatch尚未验收，计划后续相关late-base回归候选，不将安装merge冒充自动成功。 main02c正式run37077752055两架构启动/verify/pub通过，两个stable/latest索引与OCI/digest深验成功；late-base测试补齐并独立22/22通过，默认token自动链路仍待后续beta验收。",
   "meta": {}
 }
