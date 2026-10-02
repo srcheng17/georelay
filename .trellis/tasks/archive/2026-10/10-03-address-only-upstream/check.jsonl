@@ -1,0 +1,5 @@
+{"file": ".trellis/spec/backend/index.md", "reason": "共享准备与补丁边界"}
+{"file": ".trellis/spec/backend/contracts.md", "reason": "地址与数据契约不变"}
+{"file": ".trellis/spec/backend/quality-guidelines.md", "reason": "校验与发布，用户当前范围覆盖旧品牌门禁"}
+{"file": ".trellis/spec/frontend/index.md", "reason": "用户当前范围恢复原生上游 UI"}
+{"file": ".trellis/tasks/10-03-address-only-upstream/design.md", "reason": "最终地址边界与旧规范冲突处理"}

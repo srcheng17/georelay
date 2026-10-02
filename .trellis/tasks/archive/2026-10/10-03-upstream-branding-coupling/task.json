@@ -1,0 +1,36 @@
+{
+  "id": "upstream-branding-coupling",
+  "name": "upstream-branding-coupling",
+  "title": "Reduce upstream branding coupling",
+  "description": "允许内部沿用 TeslaMate 标识，减少无关静态资源与翻译上下文变化导致的构建中断，保留公开 GeoRelay 品牌与法律原文复核。",
+  "status": "completed",
+  "dev_type": null,
+  "scope": "backend",
+  "package": null,
+  "priority": "P2",
+  "creator": "ryancheng",
+  "assignee": "ryancheng",
+  "createdAt": "2026-10-03",
+  "completedAt": "2026-10-03",
+  "branch": "enhanced-hedgehog",
+  "base_branch": "main",
+  "worktree_path": null,
+  "commit": null,
+  "pr_url": null,
+  "subtasks": [],
+  "children": [],
+  "parent": null,
+  "relatedFiles": [
+    "scripts/prepare_upstream.py",
+    "patches/0003-georelay-branding.patch",
+    "tests/test_upstream.py",
+    "docs/AMAP.md",
+    "MODIFICATIONS.md",
+    ".trellis/spec/backend/quality-guidelines.md",
+    ".trellis/spec/frontend/index.md"
+  ],
+  "notes": "Completed scoped implementation and local Python/ExUnit/native ARM64 verification. Cloud dualarchitecture CI awaits a future push/PR. Startup smoke changes remain on the separately delegated agent branch.",
+  "meta": {
+    "user_approval": "User confirmed the preceding optimization scope and explicitly requested implementation on this branch."
+  }
+}

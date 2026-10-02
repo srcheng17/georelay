@@ -5,7 +5,7 @@
 ## 架构与范围
 
 ```text
-固定官方源码 + 地址刷新与 GeoRelay 品牌补丁
+固定官方源码 + 地址 URL 与刷新补丁
   → 私有 Docker 网络中的 adapter
     → 高德 regeo / 百度逆地理编码 / 官方 Nominatim
     → 独立 SQLite 永久身份与响应缓存
@@ -146,7 +146,9 @@ docker build -t georelay:local /tmp/georelay-build
 docker build -t georelay-adapter:local adapter
 ```
 
-`prepare_upstream.py` 的目标目录必须不存在或为空。脚本核实 tag 解引用后的 commit，逐字核对上游法律文件，再严格应用全部补丁；任何一步失败立即停止。
+`prepare_upstream.py` 的目标目录必须不存在或为空。脚本核实 tag 解引用后的 commit，再严格应用两个地址补丁并检查空白；任何一步失败立即停止。
+
+准备只修改地址集成需要的 HTTP、Locations 和 Geocoder 生产源码及对应测试。上游页面、名称、翻译、图标、法律文件和 Dockerfile 保持原样；这些内容变化或缺失不会触发本项目的额外审核门禁。应用仍显示 TeslaMate，仓库与镜像名为 GeoRelay。
 
 上游检查脚本创建独立 Elixir/PostgreSQL 容器、随机网络和临时存储，无 host port，退出时清理。它执行官方编译、格式检查、原 Geocoder/HTTP 测试，以及新增 URL 配置和负数 signed bigint 数据库兼容测试。
 
@@ -181,7 +183,7 @@ sidecar 的缓存 TTL 不会自动更新 PostgreSQL 里的已有地址。应用�
 
 1. [Check upstream release](../.github/workflows/upstream-release.yml) 每六小时检查官方稳定 release，也可在 `main` 手动触发。GitHub 定时任务可能延迟，不保证官方发布后立即执行。
 2. 检测到新版本后，自动创建 `upstream/<tag>` 分支，仅修改 `upstream.json`，并打开更新 PR。tag 解引用到完整 commit；草稿、预发布、降级或移动 tag 会停止处理。
-3. 显式触发 [Validate and build](../.github/workflows/ci.yml)。原生 amd64 和 arm64 runner 分别验证 Python、法律文件、严格补丁、ExUnit、镜像架构/许可及非 root 健康检查。上游 LICENSE、NOTICE 或 TRADEMARK.md 缺失或与仓库已复核原文不一致时停止，维护者需审查并更新随附原文后再构建。任一失败都会阻止发布，更新 PR 保留供维护者修复，不自动合并。
+3. 显式触发 [Validate and build](../.github/workflows/ci.yml)。原生 amd64 和 arm64 runner 分别验证 Python、固定源码、严格地址补丁、地址相关 ExUnit、镜像架构及非 root/适配器健康检查。准备和测试不改写或比对上游 UI、翻译、图标与法律文本，也不追加上游 Dockerfile 指令；应用保持 TeslaMate 名称，仓库和镜像保持 GeoRelay 名称。官方 Dockerfile 自身的输入与构建兼容性由正常镜像构建验证。任一失败都会阻止发布，更新 PR 保留供维护者修复，不自动合并。
 4. 检查全部通过后，从两份已测试镜像产物发布架构标签和多架构版本索引，不重新构建。`main` 上影响镜像的 push 也会自动发布；仍可在 `main` 手动运行并勾选 `publish`。
 5. 两个版本索引都发布并验证后，更新两个 `latest` 并回读核对。发布任务串行执行，过期的官方版本或源码任务不能覆盖 `latest`。两个 package 无法原子更新；任何更新或回读失败都会让工作流失败，此时两个 `latest` 可能暂时不一致，应使用已发布的相同固定版本。
 
@@ -209,7 +211,7 @@ docker compose up -d teslamate georelay-adapter
 
 ### 构建触发与镜像保留
 
-普通任务分支的 push 本身不发布镜像；PR 运行验证。`main` 的 push 根据整次改动判断是否需要镜像：仅 README、`docs/` 使用指南、agent 指令、Trellis 元数据或 `paseo.json` 改动时，只运行 Python 与空白检查，必需的 `verify` 汇总检查仍会完成。运行代码、补丁、`upstream.json`、测试、构建或发布流程、镜像法律文件及 `MODIFICATIONS.md`，以及无法识别的路径，均执行完整双架构构建。删除和重命名也参与判断；无法确定改动范围时执行完整构建。手动 dispatch 始终完整构建，`publish` 默认关闭；上游更新自动化仍显式开启发布。
+普通任务分支的 push 本身不发布镜像；PR 运行验证。`main` 的 push 根据整次改动判断是否需要镜像：仅 README、`docs/` 使用指南、agent 指令、Trellis 元数据或 `paseo.json` 改动时，只运行 Python 与空白检查，必需的 `verify` 汇总检查仍会完成。运行代码、补丁、`upstream.json`、测试、构建或发布流程，以及无法识别的路径，均执行完整双架构构建。删除和重命名也参与判断；无法确定改动范围时执行完整构建。手动 dispatch 始终完整构建，`publish` 默认关闭；上游更新自动化仍显式开启发布。
 
 [镜像保留工作流](../.github/workflows/image-retention.yml) 每周在 `main` 执行清理，手动运行默认只预览。它按两个 package 都具备版本索引和匹配 amd64/arm64 镜像的完整发布组计算，保留最近 10 组、两个 `latest` 及保留索引引用的子镜像。排序依据发布时间，不能只保留十条 registry version 记录，否则会破坏多架构镜像。
 
@@ -225,6 +227,6 @@ python3 scripts/retain_images.py --repository srcheng17/georelay
 
 ## 来源与许可
 
-官方 [TeslaMate](https://github.com/teslamate-org/teslamate) 的 [LICENSE](../LICENSE)、[NOTICE](../NOTICE)、[TRADEMARK.md](../TRADEMARK.md) 原样保留；代码按 AGPL-3.0-or-later 提供，修改说明见 [MODIFICATIONS.md](../MODIFICATIONS.md)。两个镜像保留各自代码许可，官方镜像构建继续保留其 NOTICE。
+官方 [TeslaMate](https://github.com/teslamate-org/teslamate) 的 [LICENSE](../LICENSE)、[NOTICE](../NOTICE)、[TRADEMARK.md](../TRADEMARK.md) 原样保留；代码按 AGPL-3.0-or-later 提供，修改说明见 [MODIFICATIONS.md](../MODIFICATIONS.md)。准备脚本保留上游原生文件和 Dockerfile；应用镜像中的许可文件按该版本官方 Dockerfile 打包。适配器镜像保留自身代码许可与修改说明。
 
 [高德逆地理编码文档](https://lbs.amap.com/api/webservice/guide/api/georegeo)、[百度逆地理编码文档](https://lbs.baidu.com/faq/api?title=webapi/guide/webservice-geocoding-abroad-base)、[Nominatim 使用政策](https://operations.osmfoundation.org/policies/nominatim/)与 [OpenStreetMap 数据许可](https://www.openstreetmap.org/copyright)分别约束对应服务和数据。
