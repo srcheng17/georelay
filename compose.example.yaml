@@ -4,6 +4,11 @@ services:
     build:
       context: ./adapter
     environment:
+      GEOCODER_PROVIDER: "${GEOCODER_PROVIDER:-auto}"
+      MAINLAND_PROVIDER: "${MAINLAND_PROVIDER:-amap}"
+      BAIDU_AK: "${BAIDU_AK:-}"
+      BAIDU_SK: "${BAIDU_SK:-}"
+      AMAP_API_REGION: "${AMAP_API_REGION:-mainland}"
       AMAP_KEY: "${AMAP_KEY:-}"
       NOMINATIM_USER_AGENT: "${NOMINATIM_USER_AGENT:-}"
       ADAPTER_DB: /data/adapter.sqlite3
@@ -28,5 +33,5 @@ services:
 volumes:
   amap-data:
 networks:
-  # 普通私有 bridge 保留访问 AMap 的出口；internal:true 会阻断出口。
+  # 普通私有 bridge 保留访问地址服务的出口；internal:true 会阻断出口。
   geocoding:

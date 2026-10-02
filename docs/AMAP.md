@@ -1,32 +1,44 @@
-# 高德地址适配指南
+# 地址适配指南
 
-本指南介绍高德地址服务的配置与维护。项目介绍和官方功能见[中文首页](../README.zh-CN.md)，修改范围见 [MODIFICATIONS.md](../MODIFICATIONS.md)，构建使用的官方版本见 [upstream.json](../upstream.json)。
+本指南介绍高德、百度和 OSM 地址服务的配置与维护。项目介绍和官方功能见[中文首页](../README.zh-CN.md)，修改范围见 [MODIFICATIONS.md](../MODIFICATIONS.md)，构建使用的官方版本见 [upstream.json](../upstream.json)。
 
 ## 架构与范围
 
 ```text
 固定官方 TeslaMate + NOMINATIM_BASE_URL 补丁
   → 私有 Docker 网络中的 adapter
-    → 高德 regeo / 官方 Nominatim
+    → 高德 regeo / 百度逆地理编码 / 官方 Nominatim
     → 独立 SQLite 永久身份与响应缓存
 ```
 
 补丁同时修改 Geocoder 的 BaseUrl 和专用 Finch pool，保留 pool size=3 与 proxy 配置。未配置自定义 URL 时，TeslaMate 仍使用官方 OSM。Sidecar 无需 Tesla token、ENCRYPTION_KEY 或生产 PostgreSQL 权限。
 
-适配器改变地址文字来源，原 PostgreSQL 继续由 TeslaMate 管理。数据库、轨迹、SQLite 和适配器响应均保留原始 **WGS84**；仅发给高德的查询临时转换为 **GCJ-02**。
+适配器改变地址文字来源，原 PostgreSQL 继续由 TeslaMate 管理。数据库、轨迹、SQLite 和适配器响应均保留原始 **WGS84**；高德大陆查询临时转换为 **GCJ-02**；百度使用 `coordtype=wgs84ll` 直接接收原坐标。
 
 TeslaMate 在行程结束解析起终点、充电开始解析地址，启动及定时任务补修缺失地址，语言切换通过 lookup 刷新地址；普通 GPS 点不会逐点逆向解析。
 
 ## 路由与名称
 
-默认策略为**大陆高德、境外 OSM**，不依赖高德海外服务权限。常见 GCJ-02 矩形仅用于快速排除，不能当作国界：
+`GEOCODER_PROVIDER` 设置默认策略；`/reverse`、`/lookup` 的 `provider=amap|baidu|osm` 可覆盖单次请求。TeslaMate 使用默认配置，地址供应商选择不改变 Web 底图。
 
-1. 框外直接请求官方 Nominatim；已有可信 OSM 来源的坐标也直接使用 OSM。
-2. 框内首次解析先请求高德，仅接受明确的大陆地址。
-3. 高德失败、缺少 Key 或无法确认地区时，请求 OSM 确认。只有明确的非大陆地址才接受 OSM 结果；普通 `country_code=cn` 保留原高德错误。
-4. 香港、澳门的 OSM 结果可能使用 `country_code=cn`，通过 `ISO3166-2-*` 字段中的 `CN-HK` / `CN-MO` 识别。成功确认的 OSM 来源永久保存，后续避免重复探测高德。
+| 配置 | 地址服务 |
+| --- | --- |
+| `GEOCODER_PROVIDER=auto`，`MAINLAND_PROVIDER=amap` | 默认：大陆高德、境外 OSM |
+| `GEOCODER_PROVIDER=auto`，`MAINLAND_PROVIDER=baidu` | 大陆百度、境外 OSM |
+| `GEOCODER_PROVIDER=amap` / `baidu` / `osm` | 固定使用指定服务 |
 
-首次解析可能请求两个服务；这不是精确国界多边形判断。高德本身存在海外服务，本项目选择境外 OSM。
+自动策略不依赖高德或百度海外权限。常见 GCJ-02 矩形仅用于快速排除，不能当作国界：
+
+1. 框外或已由自动策略确认境外的坐标，直接使用 OSM。
+2. 框内先请求选定大陆服务，仅接受明确的大陆地址。
+3. 大陆服务失败、缺少凭据或无法确认地区时，由 OSM 确认。只有明确非大陆才接受 OSM；普通 `country_code=cn` 保留大陆服务错误。
+4. OSM 港澳结果可能使用 `country_code=cn`，通过 `ISO3166-2-*` 中的 `CN-HK` / `CN-MO` 识别。
+
+显式指定 OSM 的大陆查询不会改变该坐标的自动路由。真实 OSM 对象来源与地区确认分别保存；各策略的文字缓存相互隔离。
+
+固定百度的海外解析需要相应权限。高德通过 `AMAP_API_REGION` 明确选择服务：`mainland` 使用国内接口和 GCJ-02，仅接受明确大陆地址；`global` 使用海外接口和 WGS84，需要对应海外服务 Key。境外固定使用高德时，同时设置 `GEOCODER_PROVIDER=amap`；仅更改 API region 不会改变 auto 的境外 OSM 策略。默认不把国内 Key 自动发送到海外域名。自动策略的境外地址仍使用 OSM，覆盖范围不依赖高德海外权限。
+
+百度 SN 使用对应 AK 的 SK 签名，接口直接接收 WGS84；返回地点、道路和行政区组件。高德浏览器 JSAPI 的 `securityJsCode` 与服务端签名密钥不同，本服务不使用它。
 
 高德使用 `extensions=all`，名称优先级如下：
 
@@ -48,7 +60,7 @@ TeslaMate 在行程结束解析起终点、充电开始解析地址，启动及�
 | `GET /lookup` | `osm_ids=N-1,N-2`，最多 50 个本地负数 node 身份；只返回请求身份 |
 | `GET /health` | 检查本地 SQLite 就绪，成功为 `{"status":"ok"}` |
 
-reverse / lookup 支持 `format=jsonv2`（也接受 `json`）。`Accept-Language` 区分缓存并传给 OSM；当前高德查询不传语言参数，因此英文请求也可能得到中文地址。
+reverse / lookup 支持 `format=jsonv2`（也接受 `json`）和 `provider=amap|baidu|osm`。`Accept-Language` 区分缓存并传给 OSM；当前高德、百度查询不传语言参数，使用服务默认语言，因此英文请求也可能得到中文地址。
 
 | 条件 | 状态码 |
 | --- | --- |
@@ -77,6 +89,11 @@ NOMINATIM_BASE_URL=http://amap-adapter:8080
 
 | 变量 | 默认值 / 用途 |
 | --- | --- |
+| `GEOCODER_PROVIDER` | 默认 `auto`；可选 `auto`、`amap`、`baidu`、`osm` |
+| `MAINLAND_PROVIDER` | 默认 `amap`；自动策略大陆服务可选 `amap`、`baidu` |
+| `BAIDU_AK` / `BAIDU_AK_FILE` | 百度服务端 AK；同一项两种来源互斥 |
+| `BAIDU_SK` / `BAIDU_SK_FILE` | 与 AK 匹配的百度 SN 签名 SK；同一项两种来源互斥 |
+| `AMAP_API_REGION` | 默认 `mainland`；`global` 显式选用海外 `sg-restapi.opnavi.com` 接口，请配套该服务的 Key |
 | `AMAP_KEY` | 高德 Web 服务 Key，仅提供给 sidecar |
 | `AMAP_KEY_FILE` | 可替代 `AMAP_KEY`；两者不能同时设置，文件须让容器 UID 10001 可读 |
 | `NOMINATIM_USER_AGENT` | OSM 请求必填，包含应用名和实际联系方式；未配置时 OSM 请求返回 `503` |
@@ -85,17 +102,19 @@ NOMINATIM_BASE_URL=http://amap-adapter:8080
 | `UPSTREAM_TIMEOUT_SECONDS` | 单次上游默认 `8` 秒，最大 `20`；无自动重试 |
 | `LOOKUP_TIMEOUT_SECONDS` | 整批 lookup 默认 `20` 秒，最大 `25` |
 
+只需配置实际使用的服务凭据；缺少凭据的查询返回 `503`。所有 `_FILE` 文件需让容器 UID 10001 可读，通过只读挂载或 Compose secrets 提供，不与对应环境变量同时设置。
+
 时间配置必须为大于零的有效数值。reverse 总预算为 `min(25, 2 × UPSTREAM_TIMEOUT_SECONDS + 1)` 秒，默认 17 秒，包含必要的地区确认；lookup 共享整批预算。单次上游响应读取上限为 1 MiB。
 
 ### Compose 示例
 
 #### 接入现有 stack
 
-现有 TeslaMate stack 的配置片段和镜像构建步骤见[开始使用](../README.zh-CN.md#开始使用)。需要新增 `amap-adapter`，同时将现有 TeslaMate 的 `image` 换成补丁镜像并设置 `NOMINATIM_BASE_URL`。保留其他环境变量、数据库、MQTT、Grafana 服务及原有卷；自定义网络下将适配器加入 TeslaMate 所在网络，并保留外网出口。
+现有 TeslaMate stack 的配置片段和镜像取得方式见[开始使用](../README.zh-CN.md#开始使用)。需要新增 `amap-adapter`，同时将现有 TeslaMate 的 `image` 换成补丁镜像并设置 `NOMINATIM_BASE_URL`。保留其他环境变量、数据库、MQTT、Grafana 服务及原有卷；自定义网络下将适配器加入 TeslaMate 所在网络，并保留外网出口。
 
 #### 独立开发示例
 
-在仓库根目录参照 [.env.example](../.env.example) 准备本地 `.env`。填写 Key 和调用者标识，保留该文件在 Git 忽略范围内。示例通过 `AMAP_KEY` 传值；选择 `AMAP_KEY_FILE` 时，需在 Compose 中添加对应环境变量及只读文件挂载，并清空 `AMAP_KEY`。
+在仓库根目录参照 [.env.example](../.env.example) 准备本地 `.env`。填写所选服务的凭据和调用者标识，保留该文件在 Git 忽略范围内。示例通过 `AMAP_KEY` 传值；选择 `AMAP_KEY_FILE` 时，需在 Compose 中添加对应环境变量及只读文件挂载，并清空 `AMAP_KEY`。
 
 [compose.example.yaml](../compose.example.yaml) 仅运行适配器，用于独立开发和调试：
 
@@ -128,9 +147,11 @@ docker build -t amap-adapter:local adapter
 
 ## 永久身份与备份
 
-同一规范化原始 WGS84 坐标始终对应同一个负数 `osm_id`，`osm_type=node`。它是适配器私有身份，不是真实 OSM 对象。重启、语言切换、TTL 到期和文字刷新均不改变身份；lookup 接受例如 `N-10001`。
+同一规范化原始 WGS84 坐标始终对应同一个负数 `osm_id`，`osm_type=node`。它是适配器私有身份，不是真实 OSM 对象。重启、供应商切换、语言切换、TTL 到期和文字刷新均不改变身份；lookup 接受例如 `N-10001`。
 
-成功从官方 OSM 请求获得的真实对象来源保存在 SQLite。境外语言刷新按可信来源批量调用官方 `/lookup`，严格核对返回身份集合，再还原每条本地负 ID 和原坐标；同一 OSM 对象对应多个本地坐标时也分别保留本地身份。外部传入的任意正数身份不会被盲目转发。
+成功从官方 OSM 请求获得的真实对象来源保存在 SQLite。使用 OSM 的语言刷新按可信来源批量调用官方 `/lookup`，严格核对返回身份集合，再还原每条本地负 ID 和原坐标；同一 OSM 对象对应多个本地坐标时也分别保留本地身份。外部传入的任意正数身份不会被盲目转发。
+
+升级时自动迁移缓存的策略维度，保留旧身份映射。升级前备份 SQLite；回退代码时旧版无法理解新的缓存键，应在离线恢复副本中处理文字缓存，不能删除永久身份表。
 
 **SQLite 不是可随意删除的缓存。** 丢失或回退映射库可能让新分配 ID 与 TeslaMate 已有地址冲突。使用 SQLite 在线 backup API，输出路径必须不存在：
 
@@ -145,24 +166,28 @@ docker compose -f compose.example.yaml cp amap-adapter:/data/adapter-snapshot.sq
 
 ## 版本跟进与发布
 
-构建流程与生产部署分开：
+发布镜像与更新正在运行的服务分开进行。
 
-1. [Check upstream release](../.github/workflows/upstream-release.yml) 每周检查稳定 release，输出当前及建议 tag/commit；不修改 pin。
-2. 人工审查上游变化后更新 `upstream.json` 和补丁，通过 PR 触发 [Validate and build](../.github/workflows/ci.yml)。
-3. CI 通过 Python、严格补丁检查、ExUnit、两个镜像构建和非 root 容器健康检查后，才能进入可选发布步骤；冲突或失败即停止。
-4. 仅在 `main` 手动运行工作流并勾选 `publish`，才发布已检查的镜像。版本标签为 `<upstream-tag>-amap-<完整仓库提交号>`；没有自动 `latest` / `stable` 提升。
+1. [Check upstream release](../.github/workflows/upstream-release.yml) 每六小时检查官方稳定 release，也可在 `main` 手动触发。GitHub 定时任务可能延迟，不保证官方发布后立即执行。
+2. 检测到新版本后，自动创建 `upstream/<tag>` 分支，仅修改 `upstream.json`，并打开更新 PR。tag 解引用到完整 commit；草稿、预发布、降级或移动 tag 会停止处理。
+3. 显式触发 [Validate and build](../.github/workflows/ci.yml)。原生 amd64 和 arm64 runner 分别验证 Python、严格补丁、ExUnit、镜像架构/许可及非 root 健康检查。任一失败都会阻止发布，更新 PR 保留供维护者修复，不自动合并。
+4. 检查全部通过后，从两份已测试镜像产物发布架构标签和多架构版本索引，不重新构建。`main` 的 push 也会自动发布；仍可在 `main` 手动运行并勾选 `publish`。
 
-发布目的地由工作流中的当前仓库名生成：
+两个公开镜像使用同一版本，标签格式为 `<upstream-tag>-amap-<完整源码commit>`：
 
 ```text
-ghcr.io/<owner>/<repository>-amap:<version>
-ghcr.io/<owner>/<repository>-amap-adapter:<version>
+ghcr.io/srcheng17/teslamate-amap:<version>
+ghcr.io/srcheng17/teslamate-amap-adapter:<version>
 ```
 
-这些是发布规则，不表示镜像已经发布。当前 CI 构建 `linux/amd64`；Mac ARM 可按本地构建命令生成对应镜像。定时检测和 main 手动发布在开发 PR 合并后生效；工作流不自动合并 PR 或部署生产。
+从两个 package 页面选择相同版本，将其设置为 stack 的 `TESLAMATE_AMAP_VERSION`。多架构索引支持 `linux/amd64` 和 `linux/arm64`，Docker 会选择对应架构。需要锁定镜像内容时使用 digest；版本标签本身不是注册表强制不可变的标签。没有自动 `latest` / `stable` 提升。
+
+首次 package 发布后需设置为 public，并实际验证匿名拉取；公有仓库不代表 package 自动公开。updater 使用工作流的 `contents: write`、`pull-requests: write`、`actions: write` 权限，仓库需允许 Actions 创建 PR；它不会审批或合并 PR。已存在的同版本分支和 PR 会复用，异常 pin 或分支修改会拒绝。候选分支建立后 main 发生变化，也会停止并要求维护者复核，不自动重写该分支；运行中的或已成功的同提交构建不重复触发；失败时仅在 main 和候选分支未变的情况下可重试，源分支前进后需维护者处理该 PR。
+
+镜像的 source/revision/version 标签对应本仓库源码 commit，该 commit 的 `upstream.json` 与补丁可重建该镜像。维护者仍需审查更新 PR 并同步 main；自动发布不会变更用户的 stack、数据库或运行镜像。
 
 ## 来源与许可
 
 官方 [TeslaMate](https://github.com/teslamate-org/teslamate) 的 [LICENSE](../LICENSE)、[NOTICE](../NOTICE)、[TRADEMARK.md](../TRADEMARK.md) 原样保留；代码按 AGPL-3.0-or-later 提供，修改说明见 [MODIFICATIONS.md](../MODIFICATIONS.md)。两个镜像保留各自代码许可，官方镜像构建继续保留其 NOTICE。
 
-[高德逆地理编码文档](https://lbs.amap.com/api/webservice/guide/api/georegeo)、[Nominatim 使用政策](https://operations.osmfoundation.org/policies/nominatim/)与 [OpenStreetMap 数据许可](https://www.openstreetmap.org/copyright)分别约束对应服务和数据。
+[高德逆地理编码文档](https://lbs.amap.com/api/webservice/guide/api/georegeo)、[百度逆地理编码文档](https://lbs.baidu.com/faq/api?title=webapi/guide/webservice-geocoding-abroad-base)、[Nominatim 使用政策](https://operations.osmfoundation.org/policies/nominatim/)与 [OpenStreetMap 数据许可](https://www.openstreetmap.org/copyright)分别约束对应服务和数据。

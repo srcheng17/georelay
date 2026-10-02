@@ -1,8 +1,8 @@
-# TeslaMate AMap address adapter
+# TeslaMate address adapter
 
 English | [简体中文](README.zh-CN.md)
 
-AMap place names and addresses for your self-hosted [TeslaMate](https://github.com/teslamate-org/teslamate) drive and charging records. This repository contains the source patches, a standalone address adapter and the build workflows.
+AMap, Baidu Maps and OpenStreetMap address lookup for your self-hosted [TeslaMate](https://github.com/teslamate-org/teslamate) drive and charging records. This repository contains the source patches, a standalone address adapter and the build workflows.
 
 > This project is an unofficial community tool and is not affiliated with, endorsed by, or supported by the official TeslaMate project.
 
@@ -10,37 +10,29 @@ AMap place names and addresses for your self-hosted [TeslaMate](https://github.c
 
 ## Getting started
 
-Build the two images below, then add `amap-adapter` to your existing TeslaMate stack and update the `teslamate` image and URL. The official TeslaMate image does not support `NOMINATIM_BASE_URL`, so it needs to be replaced with the patched image.
+Add `amap-adapter` to your existing TeslaMate stack and use the patched TeslaMate image. Both images support `linux/amd64` and `linux/arm64`. The official TeslaMate image does not support `NOMINATIM_BASE_URL`.
 
-<details>
-<summary>Build the images from source</summary>
-
-No prebuilt images are published yet. Run these commands from the repository root to create the local image tags used in the example. The target directory `/tmp/teslamate-amap-build` must not exist or must be empty.
-
-```sh
-python3 scripts/prepare_upstream.py /tmp/teslamate-amap-build
-docker build -t teslamate-amap:local /tmp/teslamate-amap-build
-docker build -t amap-adapter:local adapter
-```
-
-</details>
-
-Set `AMAP_KEY` and `NOMINATIM_USER_AGENT` in your stack's `.env`. Use an AMap Web Service API key and a User-Agent containing your application name and contact information; see [.env.example](.env.example) for the format.
+Choose the same published version for both images from the [TeslaMate image](https://github.com/users/srcheng17/packages/container/package/teslamate-amap) and [adapter image](https://github.com/users/srcheng17/packages/container/package/teslamate-amap-adapter) pages. Set `TESLAMATE_AMAP_VERSION`, `AMAP_KEY` and `NOMINATIM_USER_AGENT` in your stack's `.env`; see [.env.example](.env.example). The default uses AMap Web Services in mainland China and OSM elsewhere. The User-Agent must include your application name and contact information. To use Baidu instead, set `MAINLAND_PROVIDER=baidu`, `BAIDU_AK` and the matching `BAIDU_SK`.
 
 Merge this fragment into your existing Compose configuration. Keep your other TeslaMate environment variables, database, MQTT and Grafana services, and existing volumes.
 
 ```yaml
 services:
   teslamate:
-    image: teslamate-amap:local
+    image: ghcr.io/srcheng17/teslamate-amap:${TESLAMATE_AMAP_VERSION:?Set TESLAMATE_AMAP_VERSION in .env}
     environment:
       NOMINATIM_BASE_URL: http://amap-adapter:8080
       # Keep your other TeslaMate settings here.
   amap-adapter:
-    image: amap-adapter:local
+    image: ghcr.io/srcheng17/teslamate-amap-adapter:${TESLAMATE_AMAP_VERSION:?Set TESLAMATE_AMAP_VERSION in .env}
     restart: unless-stopped
     environment:
-      AMAP_KEY: "${AMAP_KEY:?Set AMAP_KEY in .env}"
+      GEOCODER_PROVIDER: "${GEOCODER_PROVIDER:-auto}"
+      MAINLAND_PROVIDER: "${MAINLAND_PROVIDER:-amap}"
+      AMAP_API_REGION: "${AMAP_API_REGION:-mainland}"
+      AMAP_KEY: "${AMAP_KEY:-}"
+      BAIDU_AK: "${BAIDU_AK:-}"
+      BAIDU_SK: "${BAIDU_SK:-}"
       NOMINATIM_USER_AGENT: "${NOMINATIM_USER_AGENT:?Set NOMINATIM_USER_AGENT in .env}"
     volumes:
       - amap-data:/data
@@ -55,15 +47,30 @@ volumes:
   amap-data:
 ```
 
-Compose's default network lets the two services reach each other. If TeslaMate uses a custom network, add the adapter to that network and keep outbound access to AMap and OSM. The adapter does not need a host port.
+Compose's default network lets the two services reach each other. If TeslaMate uses a custom network, add the adapter to that network and keep outbound access to the address services. The adapter does not need a host port.
 
 Keep `amap-data` across restarts and upgrades: it stores persistent address identities as well as cached responses. Read the [backup and existing-address compatibility notes (Chinese)](docs/AMAP.md#永久身份与备份) before replacing an existing setup. Additional settings are in the [configuration guide (Chinese)](docs/AMAP.md#配置).
 
+<details>
+<summary>Build the images from source</summary>
+
+For a local build, run these commands from the repository root and use `teslamate-amap:local` and `amap-adapter:local` in the Compose fragment. The target directory `/tmp/teslamate-amap-build` must not exist or must be empty.
+
+```sh
+python3 scripts/prepare_upstream.py /tmp/teslamate-amap-build
+docker build -t teslamate-amap:local /tmp/teslamate-amap-build
+docker build -t amap-adapter:local adapter
+```
+
+</details>
+
 ## Features
 
-Address lookup uses AMap in mainland China and OpenStreetMap elsewhere. Results include place names and address components such as province, city and road. The [routing notes (Chinese)](docs/AMAP.md#路由与名称) explain regional detection and name selection.
+Address lookup defaults to AMap in mainland China and OpenStreetMap elsewhere. Set `MAINLAND_PROVIDER=baidu` to use Baidu in mainland China, or `GEOCODER_PROVIDER=amap|baidu|osm` to use a single service. `/reverse` and `/lookup` also accept `provider=amap|baidu|osm` for an individual request. TeslaMate uses the configured default.
 
-Coordinates remain WGS84 in storage and responses. The adapter converts them to GCJ-02 only for requests to AMap. TeslaMate continues to manage drive records, charging records and stored addresses.
+Results include place names and address components such as province, city and road. Switching providers keeps the same address identity and original coordinates. Baidu overseas lookup requires the appropriate API permissions. For AMap overseas service, set `GEOCODER_PROVIDER=amap`, `AMAP_API_REGION=global` and provide its Web Service key; the default AMap profile accepts mainland results. The automatic policy uses OSM elsewhere. The [routing notes (Chinese)](docs/AMAP.md#路由与名称) explain regional detection and name selection.
+
+Coordinates remain WGS84 in storage and responses. The adapter converts mainland query coordinates to GCJ-02 for AMap; Baidu accepts WGS84 directly. Address lookup does not change the map tiles in the web interface. TeslaMate continues to manage drive records, charging records and stored addresses.
 
 TeslaMate is written in [Elixir](https://elixir-lang.org/), stores vehicle data in PostgreSQL, uses Grafana for visualization and analysis, and publishes vehicle data to a local [MQTT](https://en.wikipedia.org/wiki/MQTT) broker. The features below are from the [upstream README](https://github.com/teslamate-org/teslamate/blob/33d200b2fba9d5138803916a788cef5eae31b1aa/README.md).
 
@@ -129,15 +136,13 @@ These show the upstream TeslaMate interface and dashboards. More examples are in
 
 ## Updates
 
-This project follows stable upstream releases. Builds download the source version recorded in [upstream.json](upstream.json) and apply this repository's patches.
+The project checks for official stable releases every six hours. When a new version appears, automation pins its tag and commit in an update PR, applies the patches, and runs tests and builds on both CPU architectures. Successful builds publish new version tags to GHCR. Patch conflicts or failed checks stop publication.
 
-An automated check reports new releases each week. A maintainer reviews the changes and updates the pinned version and patches. CI then tests and builds both images; patch conflicts or failing tests stop the build.
-
-Publishing requires a manual workflow run on `main`. The workflow does not deploy services. See the [release maintenance guide (Chinese)](docs/AMAP.md#版本跟进与发布) for the process and image tags.
+Updates to this repository's `main` branch also build and publish checked images. Each image tag includes the upstream version and source commit; an update PR records the pin for that build. The workflow does not merge update PRs or update running services. See the [release guide (Chinese)](docs/AMAP.md#版本跟进与发布) for tag selection and maintenance.
 
 ## Documentation
 
-- [AMap adapter guide (Chinese)](docs/AMAP.md): configuration, API, builds and backups.
+- [Address adapter guide (Chinese)](docs/AMAP.md): configuration, API, builds and backups.
 - [TeslaMate documentation](https://docs.teslamate.org/): installation and everyday use.
 - [Source and modifications](MODIFICATIONS.md): what this repository changes and how to rebuild it.
 
@@ -145,7 +150,7 @@ Publishing requires a manual workflow run on `main`. The workflow does not deplo
 
 TeslaMate and the code in this repository are licensed under AGPL-3.0-or-later. The upstream [LICENSE](LICENSE), [NOTICE](NOTICE) and [TRADEMARK.md](TRADEMARK.md) are preserved unchanged. They contain the full license, copyright notices, additional terms and trademark requirements. Source for this modified version and rebuild instructions are documented in [MODIFICATIONS.md](MODIFICATIONS.md).
 
-AMap services and data remain subject to their [documentation and terms](https://lbs.amap.com/api/webservice/guide/api/georegeo). OpenStreetMap data is licensed under [ODbL](https://www.openstreetmap.org/copyright). The code license does not replace those service or data terms.
+AMap and Baidu Maps services and data remain subject to their [AMap](https://lbs.amap.com/api/webservice/guide/api/georegeo) and [Baidu Maps](https://lbs.baidu.com/faq/api?title=webapi/guide/webservice-geocoding-abroad-base) documentation and terms. OpenStreetMap data is licensed under [ODbL](https://www.openstreetmap.org/copyright). The code license does not replace those service or data terms.
 
 TeslaMate is an independent project and is not affiliated with, endorsed by, or sponsored by Tesla, Inc. Related trademarks belong to their respective owners. Contributions to the official project must follow its [contribution requirements](https://github.com/teslamate-org/teslamate/blob/33d200b2fba9d5138803916a788cef5eae31b1aa/README.md#license), including its FLA/CLA.
 

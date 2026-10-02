@@ -5,7 +5,7 @@
 ## Pre-Development Checklist
 
 - 阅读 [接口与数据](contracts.md)、[质量与发布](quality-guidelines.md)。
-- 追踪 TeslaMate Geocoder → Finch pool → adapter → AMap/OSM → SQLite → TeslaMate Address 的完整流。
+- 追踪 TeslaMate Geocoder → Finch pool → adapter → AMap/Baidu/OSM → SQLite → TeslaMate Address 的完整流。
 - 不操作生产容器、PostgreSQL、Dockhand，也不提交真实 Key、精确车辆坐标或运行备份。
 
 ## Quality Check

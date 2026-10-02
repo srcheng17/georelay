@@ -1,6 +1,9 @@
 """Run with python -m adapter.server; only expose port 8080 on a trusted network.
 
 AMAP_KEY or AMAP_KEY_FILE supplies the Web Service key (never both).
+BAIDU_AK and BAIDU_SK each support a mutually exclusive _FILE source.
+GEOCODER_PROVIDER defaults to auto; MAINLAND_PROVIDER defaults to amap.
+AMAP_API_REGION=mainland (default) or global selects the AMap API and datum.
 NOMINATIM_USER_AGENT must identify the operator for public OSM requests.
 ADAPTER_DB defaults to /data/adapter.sqlite3. CACHE_TTL_SECONDS defaults to 86400,
 UPSTREAM_TIMEOUT_SECONDS to 8, and LOOKUP_TIMEOUT_SECONDS to 20. No retries.
@@ -11,6 +14,7 @@ import argparse
 import contextlib
 from decimal import Decimal, InvalidOperation
 import fcntl
+import hashlib
 from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
 import json
 import math
@@ -27,9 +31,13 @@ import urllib.request
 
 
 AMAP_URL = "https://restapi.amap.com/v3/geocode/regeo"
+AMAP_GLOBAL_URL = "https://sg-restapi.opnavi.com/v3/geocode/regeo"
+BAIDU_URL = "https://api.map.baidu.com/reverse_geocoding/v3/"
 OSM_URL = "https://nominatim.openstreetmap.org/reverse"
 OSM_LOOKUP_URL = "https://nominatim.openstreetmap.org/lookup"
 MAINLAND_PROVINCES = frozenset("北京市 天津市 河北省 山西省 内蒙古自治区 辽宁省 吉林省 黑龙江省 上海市 江苏省 浙江省 安徽省 福建省 江西省 山东省 河南省 湖北省 湖南省 广东省 广西壮族自治区 海南省 重庆市 四川省 贵州省 云南省 西藏自治区 陕西省 甘肃省 青海省 宁夏回族自治区 新疆维吾尔自治区".split())
+SPECIAL_REGIONS = frozenset({"香港特别行政区", "澳门特别行政区", "台湾省", "香港", "澳门", "台湾"})
+CHINA_NAMES = frozenset({"中国", "中华人民共和国", "china"})
 MAX_BODY = 1024 * 1024
 MAX_IDS = 50  # TeslaMate Locations.update_addresses/1 batches 50 identities.
 MAX_ID = 2**63 - 1
@@ -90,13 +98,26 @@ class NoRedirect(urllib.request.HTTPRedirectHandler):
         return None
 
 
-def fetch(provider, key, lat, lon, language, user_agent, timeout, osm_ids=None):
+def baidu_sn(path, query, sk):
+    encoded = urllib.parse.quote_plus(path + "?" + query + sk, safe="")
+    return hashlib.md5(encoded.encode("utf-8")).hexdigest()
+
+
+def fetch(provider, key, lat, lon, language, user_agent, timeout, osm_ids=None,
+          baidu_sk="", amap_region="mainland"):
     """Called in a disposable process: parent kills DNS/slow-drip overruns."""
     if provider == "amap":
-        longitude, latitude = gcj02(lat, lon)
-        query = {"key": key, "location": f"{longitude:.8f},{latitude:.8f}",
+        if amap_region not in {"mainland", "global"}:
+            raise AdapterError(502, "Invalid AMap API region")
+        longitude, latitude = gcj02(lat, lon) if amap_region == "mainland" else (lon, lat)
+        location = f"{longitude:.8f},{latitude:.8f}" if amap_region == "mainland" else f"{longitude},{latitude}"
+        query = {"key": key, "location": location,
                  "output": "JSON", "extensions": "all", "radius": "1000"}
-        url, headers = AMAP_URL, {}
+        url, headers = (AMAP_URL if amap_region == "mainland" else AMAP_GLOBAL_URL), {}
+    elif provider == "baidu":
+        query = {"ak": key, "location": f"{lat},{lon}", "coordtype": "wgs84ll",
+                 "output": "json", "extensions_poi": "1"}
+        url, headers = BAIDU_URL, {}
     elif provider == "osm":
         query = {"lat": lat, "lon": lon, "format": "jsonv2", "addressdetails": 1, "namedetails": 1, "zoom": 19}
         url, headers = OSM_URL, {"User-Agent": user_agent, "Accept-Language": language}
@@ -109,7 +130,10 @@ def fetch(provider, key, lat, lon, language, user_agent, timeout, osm_ids=None):
         raise AdapterError(502, "Invalid upstream provider")
     # No environment proxies or redirects: neither may forward a key elsewhere.
     opener = urllib.request.build_opener(urllib.request.ProxyHandler({}), NoRedirect())
-    request = urllib.request.Request(url + "?" + urllib.parse.urlencode(query), headers=headers)
+    query = urllib.parse.urlencode(query)
+    if provider == "baidu":
+        query += "&sn=" + baidu_sn(urllib.parse.urlsplit(url).path, query, baidu_sk)
+    request = urllib.request.Request(url + "?" + query, headers=headers)
     with opener.open(request, timeout=timeout) as response:
         if response.status != 200:
             raise AdapterError(502, "Upstream request failed")
@@ -119,12 +143,14 @@ def fetch(provider, key, lat, lon, language, user_agent, timeout, osm_ids=None):
     return json.loads(body)
 
 
-def upstream(provider, key, lat, lon, language, user_agent, timeout, osm_ids=None):
+def upstream(provider, key, lat, lon, language, user_agent, timeout, osm_ids=None,
+             baidu_sk="", amap_region="mainland"):
     """Wall-clock limit includes DNS, headers and complete response body."""
     try:
         result = subprocess.run(
             [sys.executable, str(Path(__file__).resolve()), "--fetch"],
-            input=json.dumps([provider, key, lat, lon, language, user_agent, timeout, osm_ids]), capture_output=True,
+            input=json.dumps([provider, key, lat, lon, language, user_agent, timeout, osm_ids,
+                              baidu_sk, amap_region]), capture_output=True,
             text=True, timeout=timeout, check=False,
         )
     except subprocess.TimeoutExpired:
@@ -149,13 +175,26 @@ def mapping(value):
     return value if isinstance(value, dict) else {}
 
 
-def mainland_response(payload):
+def mainland_response(payload, provider="amap"):
     payload = mapping(payload)
-    parts = mapping(mapping(payload.get("regeocode")).get("addressComponent"))
+    if provider == "baidu":
+        result = mapping(payload.get("result"))
+        valid = type(payload.get("status")) is int and payload["status"] == 0
+    else:
+        result = mapping(payload.get("regeocode"))
+        valid = payload.get("status") == "1"
+    parts = mapping(result.get("addressComponent"))
     province, country = text(parts.get("province")), text(parts.get("country"))
-    if payload.get("status") != "1" or not province:
+    code = text(parts.get("country_code_iso2")).lower() if provider == "baidu" else ""
+    if not valid or not text(result.get("formatted_address")):
         raise AdapterError(502, "Invalid upstream response")
-    return province in MAINLAND_PROVINCES and (not country or country.casefold() in {"中国", "中华人民共和国", "china"})
+    if (code and re.fullmatch("[a-z]{2}", code) and code != "cn") or (country and country.casefold() not in CHINA_NAMES):
+        return False
+    if province in MAINLAND_PROVINCES and (not country or country.casefold() in CHINA_NAMES) and code in {"", "cn"}:
+        return True
+    if province in SPECIAL_REGIONS:
+        return False
+    raise AdapterError(502, "Unexpected upstream coverage")
 
 
 def osm_identity(payload):
@@ -222,40 +261,98 @@ def nominatim(payload, identity, lat, lon):
         "road": text(street.get("street")), "house_number": text(street.get("number")),
         "city": city, "county": text(parts.get("district")), "state": province,
         "neighbourhood": neighbourhood or text(parts.get("township")),
-        "country": "中国", "country_code": "cn",
+        "country": text(parts.get("country")),
     }
+    if address["country"].casefold() in CHINA_NAMES and province in MAINLAND_PROVINCES:
+        address["country_code"] = "cn"
     return {
         "osm_type": "node", "osm_id": -identity, "lat": lat, "lon": lon,
         "display_name": display_name, "name": name or display_name,
         "address": {key: value for key, value in address.items() if value},
         "namedetails": {"name": name or display_name},
+        "upstream": {"provider": "amap"},
+    }
+
+
+def baidu_address(payload, identity, lat, lon):
+    payload = mapping(payload)
+    result = mapping(payload.get("result"))
+    display_name = text(result.get("formatted_address"))
+    if type(payload.get("status")) is not int or payload["status"] != 0 or not display_name:
+        raise AdapterError(502, "Invalid upstream response")
+    parts = mapping(result.get("addressComponent"))
+    regions, pois = result.get("poiRegions"), result.get("pois")
+    region_name = text(mapping(regions[0]).get("name")) if isinstance(regions, list) and regions else ""
+    poi_name = text(mapping(pois[0]).get("name")) if isinstance(pois, list) and pois else ""
+    name = region_name or poi_name or text(parts.get("street")) or display_name
+    province, city = text(parts.get("province")), text(parts.get("city"))
+    if not city and province in {"北京市", "上海市", "天津市", "重庆市"}:
+        city = province
+    address = {
+        "road": text(parts.get("street")), "house_number": text(parts.get("street_number")),
+        "city": city, "county": text(parts.get("district")), "state": province,
+        "neighbourhood": text(parts.get("town")), "country": text(parts.get("country")),
+    }
+    code = text(parts.get("country_code_iso2")).lower()
+    if re.fullmatch("[a-z]{2}", code):
+        address["country_code"] = code
+    return {
+        "osm_type": "node", "osm_id": -identity, "lat": lat, "lon": lon,
+        "display_name": display_name, "name": name, "namedetails": {"name": name},
+        "address": {key: value for key, value in address.items() if value},
+        "upstream": {"provider": "baidu"},
     }
 
 
 class Adapter:
-    def __init__(self, path, key="", ttl=86400, timeout=8, lookup_timeout=20, user_agent=""):
+    def __init__(self, path, key="", ttl=86400, timeout=8, lookup_timeout=20, user_agent="",
+                 provider="auto", mainland_provider="amap", baidu_ak="", baidu_sk="", amap_region="mainland"):
+        if provider not in {"auto", "amap", "baidu", "osm"} or mainland_provider not in {"amap", "baidu"}:
+            raise ValueError("Invalid geocoder provider configuration")
+        if amap_region not in {"mainland", "global"}:
+            raise ValueError("Invalid AMap API region configuration")
         self.path, self.key = str(path), key
         self.ttl, self.timeout, self.lookup_timeout = ttl, timeout, lookup_timeout
         self.user_agent = user_agent
+        self.provider, self.mainland_provider = provider, mainland_provider
+        self.baidu_ak, self.baidu_sk = baidu_ak, baidu_sk
+        self.amap_region = amap_region
         with self.connect() as db:
-            db.executescript("""
+            db.execute("BEGIN IMMEDIATE")
+            db.execute("""
                 CREATE TABLE IF NOT EXISTS identities (
                     id INTEGER PRIMARY KEY AUTOINCREMENT,
                     lat TEXT NOT NULL, lon TEXT NOT NULL,
-                    source_osm_id INTEGER, source_osm_type TEXT, UNIQUE(lat, lon)
-                );
-                CREATE TABLE IF NOT EXISTS cache (
-                    identity INTEGER NOT NULL REFERENCES identities(id),
-                    language TEXT NOT NULL, expires REAL NOT NULL, body TEXT NOT NULL,
-                    PRIMARY KEY(identity, language)
-                );
+                    source_osm_id INTEGER, source_osm_type TEXT,
+                    outside_mainland INTEGER NOT NULL DEFAULT 0, UNIQUE(lat, lon)
+                )
             """)
             # Preserve IDs from an earlier schema; the map must never be rebuilt.
-            db.execute("BEGIN IMMEDIATE")
             columns = {row[1] for row in db.execute("PRAGMA table_info(identities)")}
             for name, kind in [("source_osm_id", "INTEGER"), ("source_osm_type", "TEXT")]:
                 if name not in columns:
                     db.execute(f"ALTER TABLE identities ADD COLUMN {name} {kind}")
+            if "outside_mainland" not in columns:
+                db.execute("ALTER TABLE identities ADD COLUMN outside_mainland INTEGER NOT NULL DEFAULT 0")
+                # Only the old schema's OSM sources implied confirmed overseas.
+                db.execute("UPDATE identities SET outside_mainland=1 WHERE source_osm_id IS NOT NULL")
+            db.execute("""
+                CREATE TABLE IF NOT EXISTS cache (
+                    identity INTEGER NOT NULL REFERENCES identities(id),
+                    language TEXT NOT NULL, policy TEXT NOT NULL,
+                    expires REAL NOT NULL, body TEXT NOT NULL,
+                    PRIMARY KEY(identity, language, policy)
+                )
+            """)
+            if "policy" not in {row[1] for row in db.execute("PRAGMA table_info(cache)")}:
+                db.execute("""CREATE TABLE cache_next (
+                    identity INTEGER NOT NULL REFERENCES identities(id),
+                    language TEXT NOT NULL, policy TEXT NOT NULL,
+                    expires REAL NOT NULL, body TEXT NOT NULL,
+                    PRIMARY KEY(identity, language, policy))""")
+                db.execute("INSERT INTO cache_next SELECT identity,language,'auto:amap',expires,body FROM cache")
+                db.execute("DROP TABLE cache")
+                db.execute("ALTER TABLE cache_next RENAME TO cache")
 
     @contextlib.contextmanager
     def connect(self, deadline=None):
@@ -271,7 +368,16 @@ class Adapter:
             db.execute("SELECT id FROM identities LIMIT 1").fetchone()
         return {"status": "ok"}
 
-    def reverse(self, lat, lon, language=""):
+    def policy(self, provider):
+        if provider is None:
+            provider = self.provider
+        elif provider not in {"amap", "baidu", "osm"}:
+            raise AdapterError(400, "Invalid provider")
+        policy = "auto:" + self.mainland_provider if provider == "auto" else provider
+        return policy + ":global" if policy.endswith("amap") and self.amap_region == "global" else policy
+
+    def reverse(self, lat, lon, language="", provider=None):
+        policy = self.policy(provider)
         deadline = time.monotonic() + min(25, 2 * self.timeout + 1)
         lat, lon = coordinate(lat, 90), coordinate(lon, 180)
         with self.connect(deadline) as db:
@@ -281,9 +387,10 @@ class Adapter:
                 identity = db.execute("INSERT INTO identities(lat,lon) VALUES(?,?)", (lat, lon)).lastrowid
             else:
                 identity = row[0]
-        return self.address(identity, lat, lon, language, deadline)
+        return self.address(identity, lat, lon, language, deadline, policy)
 
-    def lookup(self, osm_ids, language=""):
+    def lookup(self, osm_ids, language="", provider=None):
+        policy = self.policy(provider)
         deadline = time.monotonic() + self.lookup_timeout
         if osm_ids == "":
             return []  # Official details([]) can send an empty list.
@@ -300,20 +407,22 @@ class Adapter:
         rows = []
         with self.connect(deadline) as db:
             for identity in dict.fromkeys(identities):
-                row = db.execute("SELECT lat,lon,source_osm_type,source_osm_id FROM identities WHERE id=?", (identity,)).fetchone()
+                row = db.execute("SELECT lat,lon,source_osm_type,source_osm_id,outside_mainland FROM identities WHERE id=?", (identity,)).fetchone()
                 if row is None:
                     raise AdapterError(404, "Identity not found")
                 rows.append((identity, *row))
-        self.refresh_osm_batch(rows, language, deadline)
-        return [self.address(*row[:3], language, deadline) for row in rows]
+        self.refresh_osm_batch(rows, language, deadline, policy)
+        return [self.address(*row[:3], language, deadline, policy) for row in rows]
 
-    def refresh_osm_batch(self, rows, language, deadline):
+    def refresh_osm_batch(self, rows, language, deadline, policy):
+        if policy != "osm" and not policy.startswith("auto:"):
+            return
         stale = {}
         with self.connect(deadline) as db:
-            for identity, lat, lon, source_type, source_id in rows:
-                if source_id is None:
+            for identity, lat, lon, source_type, source_id, outside in rows:
+                if source_id is None or (policy != "osm" and not outside):
                     continue
-                cached = db.execute("SELECT expires FROM cache WHERE identity=? AND language=?", (identity, language)).fetchone()
+                cached = db.execute("SELECT expires FROM cache WHERE identity=? AND language=? AND policy=?", (identity, language, policy)).fetchone()
                 if cached and cached[0] > time.time():
                     continue
                 stale.setdefault((source_type, source_id), []).append((identity, lat, lon))
@@ -328,48 +437,73 @@ class Adapter:
             source = osm_identity(item)
             if source not in stale or source in found:
                 raise AdapterError(502, "Unexpected upstream identity")
-            require_outside_mainland(item, AdapterError(502, "Unexpected upstream coverage"))
+            if policy != "osm":
+                require_outside_mainland(item, AdapterError(502, "Unexpected upstream coverage"))
             found[source] = item
         bodies = [osm_address(found[source], *row) for source, local_rows in stale.items() for row in local_rows]
         with self.connect(deadline) as db:
             for body in bodies:
-                self.cache_result(db, body, language)
+                self.cache_result(db, body, language, policy)
 
-    def address(self, identity, lat, lon, language, deadline):
+    def keyed_payload(self, provider, lat, lon, language, deadline):
+        timeout = min(self.timeout, remaining(deadline))
+        if provider == "amap":
+            if not self.key:
+                raise AdapterError(503, "AMap key is not configured")
+            if self.amap_region == "global":
+                return upstream("amap", self.key, lat, lon, language, "", timeout, None, "", "global")
+            return upstream("amap", self.key, lat, lon, language, "", timeout)
+        if not self.baidu_ak or not self.baidu_sk:
+            raise AdapterError(503, "Baidu credentials are not configured")
+        return upstream("baidu", self.baidu_ak, lat, lon, language, "", timeout, None, self.baidu_sk)
+
+    def address(self, identity, lat, lon, language, deadline, policy):
         with self.connect(deadline) as db:
-            cached = db.execute("SELECT expires,body FROM cache WHERE identity=? AND language=?", (identity, language)).fetchone()
-            source = db.execute("SELECT source_osm_id FROM identities WHERE id=?", (identity,)).fetchone()[0]
+            cached = db.execute("SELECT expires,body FROM cache WHERE identity=? AND language=? AND policy=?", (identity, language, policy)).fetchone()
+            outside = db.execute("SELECT outside_mainland FROM identities WHERE id=?", (identity,)).fetchone()[0]
         remaining(deadline)
         if cached and cached[0] > time.time():
             return json.loads(cached[1])
-        body = None
-        error = AdapterError(502, "Unexpected upstream coverage")
-        if in_amap_bounds(lat, lon) and source is None:
-            try:
-                if not self.key:
-                    raise AdapterError(503, "AMap key is not configured")
-                payload = upstream("amap", self.key, lat, lon, language, "", min(self.timeout, remaining(deadline)))
-                if mainland_response(payload):
-                    body = nominatim(payload, identity, lat, lon)
-            except AdapterError as exc:
-                error = exc
-        if body is None:
+        if policy == "osm":
             payload = self.osm(lat, lon, language, deadline)
-            require_outside_mainland(payload, error)
             body = osm_address(payload, identity, lat, lon)
+        elif not policy.startswith("auto:"):
+            provider = policy.split(":")[0]
+            payload = self.keyed_payload(provider, lat, lon, language, deadline)
+            if provider == "amap" and self.amap_region == "mainland" and not mainland_response(payload):
+                raise AdapterError(502, "Unexpected upstream coverage")
+            body = (nominatim if provider == "amap" else baidu_address)(payload, identity, lat, lon)
+        else:
+            body = None
+            provider = policy.split(":")[1]
+            error = AdapterError(502, "Unexpected upstream coverage")
+            if in_amap_bounds(lat, lon) and not outside:
+                try:
+                    payload = self.keyed_payload(provider, lat, lon, language, deadline)
+                    if mainland_response(payload, provider):
+                        body = (nominatim if provider == "amap" else baidu_address)(payload, identity, lat, lon)
+                except AdapterError as exc:
+                    error = exc
+            if body is None:
+                payload = self.osm(lat, lon, language, deadline)
+                require_outside_mainland(payload, error)
+                body = osm_address(payload, identity, lat, lon)
         remaining(deadline)
         with self.connect(deadline) as db:
-            self.cache_result(db, body, language)
+            self.cache_result(db, body, language, policy)
         return body
 
-    def cache_result(self, db, body, language):
-        db.execute("INSERT OR REPLACE INTO cache VALUES(?,?,?,?)", (
-            -body["osm_id"], language, time.time() + self.ttl, json.dumps(body, ensure_ascii=False),
+    def cache_result(self, db, body, language, policy):
+        db.execute("INSERT OR REPLACE INTO cache VALUES(?,?,?,?,?)", (
+            -body["osm_id"], language, policy, time.time() + self.ttl, json.dumps(body, ensure_ascii=False),
         ))
         source = body.get("upstream", {})
-        db.execute("UPDATE identities SET source_osm_type=?, source_osm_id=? WHERE id=?", (
-            source.get("osm_type"), source.get("osm_id"), -body["osm_id"],
-        ))
+        if source.get("provider") == "osm":
+            db.execute("UPDATE identities SET source_osm_type=?, source_osm_id=? WHERE id=?", (
+                source["osm_type"], source["osm_id"], -body["osm_id"],
+            ))
+            if policy.startswith("auto:"):
+                db.execute("UPDATE identities SET outside_mainland=1 WHERE id=?", (-body["osm_id"],))
 
     def osm(self, lat, lon, language, deadline, osm_ids=None):
         if not self.user_agent:
@@ -445,11 +579,11 @@ class Handler(BaseHTTPRequestHandler):
             if url.path == "/health":
                 body = self.server.adapter.health()
             elif url.path == "/reverse":
-                body = self.server.adapter.reverse(params.get("lat"), params.get("lon"), language)
+                body = self.server.adapter.reverse(params.get("lat"), params.get("lon"), language, params.get("provider"))
             elif url.path == "/lookup":
                 if "osm_ids" not in params:
                     raise AdapterError(400, "Missing identities")
-                body = self.server.adapter.lookup(params["osm_ids"], language)
+                body = self.server.adapter.lookup(params["osm_ids"], language, params.get("provider"))
             else:
                 raise AdapterError(404, "Endpoint not found")
             self.respond(200, body)
@@ -481,6 +615,17 @@ def number_env(name, default, maximum):
         raise ValueError("Invalid " + name) from None
 
 
+def secret_env(name):
+    value, path = os.environ.get(name, ""), os.environ.get(name + "_FILE", "")
+    if value and path:
+        raise ValueError("Set only one " + name + " source")
+    if path:
+        value = Path(path).read_text().strip()
+    if len(value) > 512 or any(char.isspace() for char in value):
+        raise ValueError("Invalid " + name + " configuration")
+    return value
+
+
 def main():
     parser = argparse.ArgumentParser(description=__doc__)
     parser.add_argument("--backup", metavar="DEST")
@@ -496,19 +641,15 @@ def main():
             with contextlib.closing(sqlite3.connect(args.backup)) as destination:
                 source.backup(destination)
         return
-    key, key_file = os.environ.get("AMAP_KEY", ""), os.environ.get("AMAP_KEY_FILE", "")
-    if key and key_file:
-        raise ValueError("Set only one AMap key source")
-    if key_file:
-        key = Path(key_file).read_text().strip()
-    if len(key) > 512 or any(char.isspace() for char in key):
-        raise ValueError("Invalid AMap key configuration")
+    key, baidu_ak, baidu_sk = (secret_env(name) for name in ("AMAP_KEY", "BAIDU_AK", "BAIDU_SK"))
     user_agent = os.environ.get("NOMINATIM_USER_AGENT", "").strip()
     if len(user_agent) > 256 or any(ord(char) < 32 or ord(char) > 126 for char in user_agent):
         raise ValueError("Invalid Nominatim user agent")
     adapter = Adapter(path, key, number_env("CACHE_TTL_SECONDS", "86400", 31536000),
                       number_env("UPSTREAM_TIMEOUT_SECONDS", "8", 20),
-                      number_env("LOOKUP_TIMEOUT_SECONDS", "20", 25), user_agent)
+                      number_env("LOOKUP_TIMEOUT_SECONDS", "20", 25), user_agent,
+                      os.environ.get("GEOCODER_PROVIDER", "auto"), os.environ.get("MAINLAND_PROVIDER", "amap"),
+                      baidu_ak, baidu_sk, os.environ.get("AMAP_API_REGION", "mainland"))
     with Server(("0.0.0.0", 8080), adapter) as server:
         server.serve_forever()
 
