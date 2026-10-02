@@ -1,0 +1,2 @@
+{"file": ".trellis/spec/backend/contracts.md", "reason": "跨层边界与真实实现核对"}
+{"file": ".trellis/spec/frontend/index.md", "reason": "不承诺客户端地图切换"}

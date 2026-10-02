@@ -1,113 +1,103 @@
-# TeslaMate 高德地址适配
+# 高德地址适配 · TeslaMate 社区修改源码
 
-基于官方稳定版的小型维护项目：**大陆地址使用高德，境外使用 OpenStreetMap/Nominatim**。官方 TeslaMate 只增加 geocoder URL 配置补丁，地址转换、缓存和身份映射由独立 Python 标准库 sidecar 完成。
+为个人自托管场景提供高德地址解析能力，基于官方 **TeslaMate v4.3.0** 维护小型源码补丁与独立适配服务。本仓库保存补丁、sidecar、测试和构建流程；完整 TeslaMate 源码在构建时从固定官方提交取得。
 
-本项目是个人修改版本，不是官方 TeslaMate 发布。当前固定 **v4.3.0**，commit `33d200b2fba9d5138803916a788cef5eae31b1aa`；来源以 [upstream.json](upstream.json) 为准，不在仓库存放整份上游源码。
+> This project is an unofficial community tool and is not affiliated with, endorsed by, or supported by the official TeslaMate project.
 
-## 范围
+**当前状态：** 功能位于待合并的[开发 PR](https://github.com/srcheng17/teslamate/pull/1)，尚未部署生产，也未发布本修改版本的镜像。上游固定为 `v4.3.0` / `33d200b2fba9d5138803916a788cef5eae31b1aa`，以 [upstream.json](upstream.json) 为准。
 
-- 提供 `/reverse`、`/lookup`、`/health`；SQLite 永久负数身份、按语言分开的响应缓存；无真实 Key 的模拟与本地 HTTP 测试。
-- URL 补丁同时修改 Geocoder 和专用 Finch pool，保留 size=3 与 proxy；官方默认仍为 OSM。
-- PR 校验、固定版本构建、稳定 release 检测和手动版本镜像发布流程；不自动提升 stable，不自动部署。
-- **不修改生产服务、PostgreSQL 或 Dockhand stack。** 真实 Key 已在隔离容器联调通过；旧私人版身份导入、数据库升级迁移尚未执行。
+[使用与配置](docs/AMAP.md) · [开发与构建](docs/AMAP.md#开发与构建) · [永久身份与备份](docs/AMAP.md#永久身份与备份) · [修改说明](MODIFICATIONS.md) · [官方文档](https://docs.teslamate.org/)
 
-这只改变地址文字来源。HedgieMate/Grafana 的底图、地图纠偏和刷新频率由客户端负责。数据库、轨迹、SQLite 和 adapter 返回值始终保留 **WGS84**；只有发给高德的查询坐标临时转成 GCJ-02，不会写回或造成客户端二次纠偏。
+## 项目简介
 
-TeslaMate 在行程结束解析起终点、充电开始解析地址，并修复缺失地址；它不对每个 GPS 点进行逆向解析。
+[TeslaMate](https://github.com/teslamate-org/teslamate) 是用于 Tesla 车辆的自托管数据记录与分析工具。以下简介、官方功能及截图依据固定版本的[上游 README](https://github.com/teslamate-org/teslamate/blob/33d200b2fba9d5138803916a788cef5eae31b1aa/README.md) 整理：
 
-## 结构与路由
+- 使用 [Elixir](https://elixir-lang.org/) 编写。
+- 车辆数据保存在 PostgreSQL。
+- 通过 Grafana 展示和分析数据。
+- 通过本地 [MQTT](https://en.wikipedia.org/wiki/MQTT) Broker 发布车辆数据。
+
+官方项目建议从[官方仓库](https://github.com/teslamate-org/teslamate)与[官方文档](https://docs.teslamate.org/)获取正式版本。本仓库的社区修改内容、来源和重建方法见 [MODIFICATIONS.md](MODIFICATIONS.md)。
+
+## 新增的高德地址能力
+
+- **大陆高德、境外 OSM：** 独立服务提供 Nominatim 兼容的 `/reverse` 与 `/lookup`，保留官方地址读取链路。地区判断与公共 OSM 使用限制见[路由说明](docs/AMAP.md#路由与名称)。
+- **保留地点名称：** 高德请求使用 `extensions=all`，优先首条 AOI 名称、再首条 POI 名称，缺失时回退到建筑、小区、道路和完整地址。
+- **保留原始坐标和身份：** 仅高德查询临时转为 GCJ-02；返回值及存储保持 WGS84。独立 SQLite 保存永久负数身份，语言变化、缓存到期和重启均保持身份稳定。
+- **保持小型修改：** TeslaMate 只增加 `NOMINATIM_BASE_URL` 配置补丁；适配逻辑使用 Python 标准库。构建校验固定上游提交，补丁或测试失败即停止。
 
 ```text
-固定官方 TeslaMate + URL 补丁
-  → 私有 Docker 网络中的 adapter
-    → 高德 regeo / 官方 Nominatim
-    → 独立 SQLite 身份与缓存
+官方 TeslaMate + URL 补丁 → 私有网络中的 adapter → 高德 / 官方 Nominatim
+                                      └→ SQLite 永久身份与响应缓存
 ```
 
-境外不依赖高德海外权限。常见 GCJ-02 矩形只用于快速排除，不能当作国界：框外直接查询 OSM；框内先请求高德，仅接受明确的大陆地址。高德失败或无法确认地区时，用 OSM 的 `country_code` 和港澳 ISO 地区代码确认；仅明确非大陆才接受 OSM 结果，大陆仍报告原高德错误。首次判断可能请求两个服务，已确认的 OSM 来源会持久保存。
+这项能力改善**地址文字**。HedgieMate、Grafana 等客户端的底图、地图显示纠偏和刷新频率仍由客户端决定；不会将车辆轨迹写成 GCJ-02。历史私人版本的地址身份导入及数据库迁移仍需单独验证。
 
-高德请求使用 `extensions=all` 保留地点详情；`name` 优先首条 AOI（区域）名称、再首条 POI（兴趣点）名称，缺失时依次使用建筑、小区、道路和完整地址。基础响应不提供 AOI/POI 详情，名称可能退化为道路或完整地址。已有缓存到期后自然刷新，无需更换永久身份。
+验证记录包含 **32 项 Python 测试、105 项上游 ExUnit 测试**及隔离容器联调。地点名称回归的同点样本已恢复原名称；样本结果不代表全库或全球地址准确率。参见[基础验收](.trellis/tasks/archive/2026-10/10-02-amap-mvp/validation.md)与[名称回归验收](.trellis/tasks/archive/2026-10/10-02-amap-poi-name/validation.md)。
 
-公共 Nominatim 需要标识调用者、缓存和限流。本服务将 OSM 请求串行化，每次完成后至少间隔一秒；仅运行一份共享本地数据卷的服务，不用于批量采集。地址数据保留 OSM attribution。参见 [Nominatim 使用政策](https://operations.osmfoundation.org/policies/nominatim/)。
+## 文档
 
-## 配置
-
-`NOMINATIM_BASE_URL` 是**本项目新增变量，官方镜像本身没有此能力**。补丁版 TeslaMate 可设置：
-
-```dotenv
-NOMINATIM_BASE_URL=http://amap-adapter:8080
-```
-
-只接受 HTTP/HTTPS origin，可含端口，不能包含账号、路径、query 或 fragment；末尾 `/` 会规范化。未设置时使用 `https://nominatim.openstreetmap.org`。`NOMINATIM_PROXY` 是 CONNECT proxy，不是 geocoder URL。
-
-Sidecar 配置：
-
-| 变量 | 默认值 / 用途 |
+| 内容 | 入口 |
 | --- | --- |
-| `AMAP_KEY` | 高德 Web 服务 Key，只交给 sidecar |
-| `AMAP_KEY_FILE` | 可替代 `AMAP_KEY`，两者不能同时设置；文件须让容器 UID 10001 可读 |
-| `NOMINATIM_USER_AGENT` | 境外请求必填，包含应用名和实际联系方式；未配置时 OSM 请求返回 503 |
-| `ADAPTER_DB` | `/data/adapter.sqlite3`，必须永久保存 |
-| `CACHE_TTL_SECONDS` | `86400`，最大 31536000；只影响响应缓存 |
-| `UPSTREAM_TIMEOUT_SECONDS` | 单次上游最多 `8` 秒，最大 20；无自动重试 |
-| `LOOKUP_TIMEOUT_SECONDS` | 整批 lookup 最多 `20` 秒，最大 25 |
+| 官方安装、使用与仪表盘 | [TeslaMate 官方文档](https://docs.teslamate.org/) |
+| 适配器接口、配置与运行示例 | [高德地址适配指南](docs/AMAP.md) |
+| 本地检查、固定版本构建与发布维护 | [开发与构建](docs/AMAP.md#开发与构建)、[版本跟进与发布](docs/AMAP.md#版本跟进与发布) |
+| 永久身份、备份和历史兼容限制 | [永久身份与备份](docs/AMAP.md#永久身份与备份) |
 
-reverse 总预算为 `min(25, 2 × UPSTREAM_TIMEOUT_SECONDS + 1)` 秒，包含必要的地区确认；lookup 共用整批预算。响应体最多 1 MiB，lookup 最多 50 个本地身份。超时或上游错误返回明确失败，不合成永久 `Unknown`。`/health` 仅证明本地存储可用，不证明 Key、配额或外网正常。
+## 官方功能
 
-`Accept-Language` 区分缓存并传给 OSM；当前高德查询不传语言参数，英文请求也可能返回中文地址。
+以下为官方 v4.3.0 的功能概览；本仓库通过固定官方源码构建保留这些能力。
 
-## 开发与验证
+### General · 通用功能
 
-2026-10-02 使用现有 Key，在独立非 root、只读根文件系统、无 host port 的容器中完成18项真实联调检查：北京/杭州走高德，巴黎/首尔/香港/澳门走 OSM；混合语言 lookup、重启、TTL 刷新和断网恢复均保留负数身份与原始 WGS84。有效缓存断网可用，过期缓存明确失败。Key 经标准输入写入临时内存文件系统，测试资源已清理，生产容器未重启。详见[验收记录](.trellis/tasks/archive/2026-10/10-02-amap-mvp/validation.md)。这证明所测样本和当前 Key 可用，不代表全球覆盖或生产迁移已验证。
+- 高精度行程记录。
+- 尽快让车辆进入休眠，避免额外的待机耗电。
+- 自动地址解析和自定义地理围栏。
+- 通过 MQTT 集成 Home Assistant、Node-RED 和 Telegram。
+- 同一 Tesla 账户支持多辆车辆。
+- 充电费用记录。
+- 从 TeslaFi 和 tesla-apiscraper 导入数据。
+- 浅色、深色及跟随系统的主题模式。
+- Web 界面支持包括简体中文、繁体中文在内的 19 种语言；缺失译文回退为英语。
 
-无需真实 Key：
+### Dashboards · 仪表盘
 
-```sh
-python3 -m unittest discover -s tests -v
-git diff --check
-python3 scripts/prepare_upstream.py /tmp/teslamate-amap-build
-bash scripts/test_upstream.sh /tmp/teslamate-amap-build
-docker build -t teslamate-amap:local /tmp/teslamate-amap-build
-docker build -t amap-adapter:local adapter
-```
+下列链接指向官方仪表盘说明与示例截图。
 
-准备目录必须不存在或为空。脚本核实 tag 解引用 commit，再严格应用补丁，任一步失败立即停止。上游测试脚本只创建独立 Elixir/PostgreSQL 容器、随机网络和临时存储，无 host port，退出时清理。它会执行官方编译、格式检查、原 Geocoder/HTTP 测试以及新增负数 ID 数据库兼容测试。
+| 面板 | 面板 |
+| --- | --- |
+| [电池健康](https://docs.teslamate.org/docs/screenshots/#battery-health) | [电量](https://docs.teslamate.org/docs/screenshots/#charge-level) |
+| [充电记录](https://docs.teslamate.org/docs/screenshots/#charges) | [充电详情](https://docs.teslamate.org/docs/screenshots/#charge-details) |
+| [充电统计](https://docs.teslamate.org/docs/screenshots/#charging-stats) | [数据库信息](https://docs.teslamate.org/docs/screenshots/#database-information) |
+| [行程统计](https://docs.teslamate.org/docs/screenshots/#drive-stats) | [行程记录](https://docs.teslamate.org/docs/screenshots/#drives) |
+| [行程详情](https://docs.teslamate.org/docs/screenshots/#drive-details) | [效率与能耗](https://docs.teslamate.org/docs/screenshots/#efficiency) |
+| [地点与地址](https://docs.teslamate.org/docs/screenshots/#location-addresses) | [里程](https://docs.teslamate.org/docs/screenshots/#mileage) |
+| [概览](https://docs.teslamate.org/docs/screenshots/#overview) | [预计续航与电池衰减](https://docs.teslamate.org/docs/screenshots/#projected-range) |
+| [车辆在线与休眠状态](https://docs.teslamate.org/docs/screenshots/#states) | [综合统计](https://docs.teslamate.org/docs/screenshots/#statistics) |
+| [温度](https://docs.teslamate.org/docs/screenshots/#temperatures) | [时间线](https://docs.teslamate.org/docs/screenshots/#timeline) |
+| [旅程](https://docs.teslamate.org/docs/screenshots/#trip) | [车辆软件更新](https://docs.teslamate.org/docs/screenshots/#updates) |
+| [待机耗电](https://docs.teslamate.org/docs/screenshots/#vampire-drain) | [历史行驶地图](https://docs.teslamate.org/docs/screenshots/#visited-lifetime-driving-map) |
 
-运行示例 sidecar 时，先复制 `.env.example` 为 `.env` 并按需填写，文件不提交 Git；健康检查无需 Key。配置了服务后，再使用 [compose.example.yaml](compose.example.yaml)：
+## Screenshots · 官方截图
 
-```sh
-docker compose -f compose.example.yaml config --quiet
-docker compose -f compose.example.yaml up -d --build
-docker compose -f compose.example.yaml exec -T amap-adapter python -c 'import urllib.request; print(urllib.request.urlopen("http://127.0.0.1:8080/health").read().decode())'
-```
+以下图片来自固定的官方 v4.3.0 源码，用于展示 TeslaMate Web 界面与内置仪表盘。更多图片见[官方截图文档](https://docs.teslamate.org/docs/screenshots/)。
 
-示例不开放 host port，也不是生产 stack 替换文件。未来部署时，补丁版 TeslaMate 必须加入同一网络；普通 bridge 保留上游访问出口，不能将其设成阻断出口的 `internal: true`。
+![官方 TeslaMate Web 界面](https://raw.githubusercontent.com/teslamate-org/teslamate/33d200b2fba9d5138803916a788cef5eae31b1aa/website/static/screenshots/web_interface.png)
 
-## 永久身份与备份
+![官方 TeslaMate 行程详情仪表盘](https://raw.githubusercontent.com/teslamate-org/teslamate/33d200b2fba9d5138803916a788cef5eae31b1aa/website/static/screenshots/drive.png)
 
-同一规范化原始 WGS84 坐标始终对应同一个负数 `osm_id`，`osm_type=node`。这属于适配器私有身份，不是真实 OSM 对象。重启、语言切换、缓存到期和文字刷新均不得改变身份。lookup 接受例如 `N-10001`，只返回请求的本地身份。
+![官方 TeslaMate 电池健康仪表盘](https://raw.githubusercontent.com/teslamate-org/teslamate/33d200b2fba9d5138803916a788cef5eae31b1aa/website/static/screenshots/battery-health.png)
 
-已成功从 OSM 获得的真实对象来源保存在 SQLite，供境外语言刷新批量调用官方 `/lookup`；结果按来源身份匹配，再还原本地负 ID 和原坐标，不能直接接收任意正数身份。私人版的正数 hash 与真实 OSM ID 无法仅凭数值区分，历史迁移需另行验证。
+## License · 许可与来源
 
-**SQLite 不是可随意删除的缓存目录。** 丢失或回退映射库可能让新分配 ID 与 TeslaMate 已有地址冲突。使用在线 backup API，输出路径必须不存在：
+TeslaMate 及本仓库代码按 **AGPL-3.0-or-later** 提供。上游 [LICENSE](LICENSE)、[NOTICE](NOTICE) 和 [TRADEMARK.md](TRADEMARK.md) 原样保留；完整许可、版权、附加条款及商标要求以这些文件为准。修改版本的对应源码与重建方式见 [MODIFICATIONS.md](MODIFICATIONS.md)。
 
-```sh
-docker compose -f compose.example.yaml exec -T amap-adapter python -m adapter.server --backup /data/adapter-snapshot.sqlite3
-docker compose -f compose.example.yaml cp amap-adapter:/data/adapter-snapshot.sqlite3 ./adapter-snapshot.sqlite3
-```
+高德服务与数据受其[服务文档及条款](https://lbs.amap.com/api/webservice/guide/api/georegeo)约束；OpenStreetMap 数据使用 [ODbL 许可](https://www.openstreetmap.org/copyright)。代码许可不替代上游服务或数据许可。
 
-备份包含位置隐私，需受控保存；不要直接复制活动数据库文件。恢复时先停 sidecar，恢复与 TeslaMate 数据一致的完整映射库，再验证身份后启动。`.osm.lock` 只保存限流时间，无需当作身份备份。此处只给出方法，本次没有备份或更改生产。
+TeslaMate 是独立项目，与 Tesla, Inc. 无隶属、认可或赞助关系；相关商标归其权利人所有。向官方上游贡献时，请遵循[官方贡献说明](https://github.com/teslamate-org/teslamate/blob/33d200b2fba9d5138803916a788cef5eae31b1aa/README.md#license)，包括其 FLA/CLA 要求。
 
-## GitHub 跟进
+## Credits · 致谢
 
-- `Check upstream release` 每周检测稳定 release，输出当前/建议 tag 和 commit，不改 pin、不创建部署。
-- 人工审查新版变化后更新 `upstream.json` 和补丁，由 PR 触发 `Validate and build`。
-- CI 必须通过 Python、严格补丁、ExUnit、两个镜像构建和非 root 容器健康检查；冲突或失败不发布。
-- 仅 `main` 上手动运行并勾选 `publish` 才推送已经检查过的镜像。标签为 `<upstream-tag>-amap-<完整仓库提交号>`，无 `latest`/`stable`。
-- 当前 CI 构建 `linux/amd64`；Mac ARM 可在本机按上述命令构建。定时检测和 main 手动发布须在 PR 合并后生效；本任务不自动合并或发布镜像。
-
-## 来源与许可
-
-官方 [TeslaMate](https://github.com/teslamate-org/teslamate) 的 [LICENSE](LICENSE)、[NOTICE](NOTICE)、[TRADEMARK.md](TRADEMARK.md) 原样保留。代码按 AGPL-3.0-or-later 提供；修改说明和对应源码见 [MODIFICATIONS.md](MODIFICATIONS.md)。官方镜像构建继续保留其许可文本，adapter 镜像也携带代码许可。
-
-[高德 Web Service 文档](https://lbs.amap.com/api/webservice/guide/api/georegeo) 与 [OpenStreetMap 数据许可](https://www.openstreetmap.org/copyright) 分别约束上游服务和数据。高德本身存在海外服务；本项目按用户选择采用境外 OSM，并非声称高德没有海外能力。
+- TeslaMate 初始作者：[Adrian Kumpf](https://github.com/adriankumpf)。
+- [TeslaMate 官方贡献者](https://github.com/teslamate-org/teslamate/graphs/contributors)。
+- [本仓库修改与维护贡献者](https://github.com/srcheng17/teslamate/graphs/contributors)。
