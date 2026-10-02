@@ -18,7 +18,7 @@ API = "https://api.github.com/repos/teslamate-org/teslamate"
 def github_json(path):
     headers = {
         "Accept": "application/vnd.github+json",
-        "User-Agent": "teslamate-amap-release-check",
+        "User-Agent": "georelay-release-check",
         "X-GitHub-Api-Version": "2022-11-28",
     }
     if os.environ.get("GITHUB_TOKEN"):

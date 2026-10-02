@@ -66,7 +66,7 @@ PY
 for architecture in amd64 arm64; do
   test -s "$artifacts/checked-images-$architecture.tar"
 done
-version="$tag-amap-$GITHUB_SHA"
+version="$tag-georelay-$GITHUB_SHA"
 repository="ghcr.io/$(printf '%s' "$GITHUB_REPOSITORY" | tr '[:upper:]' '[:lower:]')"
 export IMAGE_VERSION="$version" IMAGE_SOURCE="https://github.com/$GITHUB_REPOSITORY"
 manifest_dir=$(mktemp -d)
@@ -75,11 +75,11 @@ printf '%s' "$GHCR_TOKEN" | docker login ghcr.io -u "$GITHUB_ACTOR" --password-s
 for architecture in amd64 arm64; do
   docker load -i "$artifacts/checked-images-$architecture.tar"
   # Both archives use :checked: push this architecture before the next load replaces it.
-  for image in teslamate-amap amap-adapter; do
-    if [[ $image == teslamate-amap ]]; then
-      package="$repository-amap"
+  for image in georelay georelay-adapter; do
+    if [[ $image == georelay ]]; then
+      package="$repository"
     else
-      package="$repository-amap-adapter"
+      package="$repository-adapter"
     fi
     docker image inspect "$image:checked" | python3 -c '
 import json, os, sys
@@ -116,7 +116,7 @@ copies = [raw, raw[:-1]] if raw.endswith(b"\n") else [raw]
 assert sys.argv[2] in {"sha256:" + hashlib.sha256(data).hexdigest() for data in copies}, "index differs from the checked version digest"
 PY
 }
-for package in "$repository-amap" "$repository-amap-adapter"; do
+for package in "$repository" "$repository-adapter"; do
   metadata="$manifest_dir/${package##*/}.metadata.json"
   raw_index="$manifest_dir/${package##*/}.json"
   docker buildx imagetools create --metadata-file "$metadata" --tag "$package:$version" "$package:$version-amd64" "$package:$version-arm64"
@@ -124,7 +124,7 @@ for package in "$repository-amap" "$repository-amap-adapter"; do
   verify_index "$raw_index" "$(index_digest "$metadata")"
 done
 if [[ -n ${GITHUB_STEP_SUMMARY:-} ]]; then
-  printf 'Published checked linux/amd64 and linux/arm64 images:\n\n- `%s-amap:%s`\n- `%s-amap-adapter:%s`\n\nNo deployment performed.\n' "$repository" "$version" "$repository" "$version" >> "$GITHUB_STEP_SUMMARY"
+  printf 'Published checked linux/amd64 and linux/arm64 images:\n\n- `%s:%s`\n- `%s-adapter:%s`\n\nNo deployment performed.\n' "$repository" "$version" "$repository" "$version" >> "$GITHUB_STEP_SUMMARY"
 fi
 
 # Publication jobs are serialized; still recheck freshness after uploading both indexes.
@@ -162,7 +162,7 @@ if [[ -n $skip_reason ]]; then
   fi
   exit 0
 fi
-for package in "$repository-amap" "$repository-amap-adapter"; do
+for package in "$repository" "$repository-adapter"; do
   digest=$(index_digest "$manifest_dir/${package##*/}.metadata.json")
   # A single index source is copied unchanged; no rebuild or manifest recomposition.
   docker buildx imagetools create --prefer-index=false --tag "$package:latest" "$package@$digest"

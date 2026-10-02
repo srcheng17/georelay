@@ -8,6 +8,8 @@
 
 固定 `upstream.json` 中稳定 tag 和解引用 commit，下载到临时/忽略目录；先校验 commit 再 `git apply --check`，任何失败停止。保留上游 LICENSE/NOTICE。GitHub release 检测自动创建仅 pin 变更的上游分支与 PR，并显式触发双架构构建；main push 或受控上游分支 dispatch 通过全部校验后自动发布版本镜像。上游分支必须与 main 相比仅改 upstream.json，并匹配稳定 tag；不自动合并更新 PR。两架构都检查成功才从已测试产物发布索引，保留单名 verify 汇总检查，不得绕过测试。不自动部署、不自动提升 stable、不 force push。
 
+共享prepare路径在应用补丁前逐字核对LICENSE/NOTICE/TRADEMARK.md与仓库复核原文；缺失或变化停止，人工复核后更新随附文件。修改通知含相关日期并进入两个镜像，发布检查验证可读。GeoRelay是独立公开名称，镜像为georelay和georelay-adapter，保留旧包但不向其发布新版本；上游命名/图标变化需重新审查品牌补丁，不能静默跳过。修改版保留内部模块、数据库和MQTT兼容标识，不借重构改动数据契约。
+
 用户已授权维护两镜像的 `latest`。所有发布任务共用 publish job concurrency group；先验证两个版本索引，再复制已测试索引至 latest，不重新构建。推广前回读官方最新稳定版和源码状态，旧 pin 或过期源码跳过推广，网络/校验失败停止；GitHub 队列不保证 FIFO，不能仅凭串行认为版本不会倒退。每个 latest 必须回读为对应版本的同一双架构内容。两个 package 没有原子更新，任一推广或回读失败使 workflow 失败，不能报告双镜像完成。保留固定版本/digest用法；latest本身不会拉取或重建运行容器。
 
 改动最少的必要文件，不引入框架/ORM/插件层。构建流程本身要有失败测试。新增测试路径必须与 workflow 和 README 命令一致。

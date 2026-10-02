@@ -1,6 +1,6 @@
 # 后端开发约定
 
-本仓库维护独立 Python 标准库 `adapter/server.py`、`patches/` 中的官方 TeslaMate URL 补丁和 `.github/workflows/` 构建流程，不复制完整上游。实现以当前任务 PRD/design、下列契约和 `tests/` 共同验证。
+本仓库维护独立 Python 标准库 `adapter/server.py`、`patches/` 中的上游 URL、刷新与 GeoRelay 品牌补丁和 `.github/workflows/` 构建流程，不复制完整上游。实现以当前任务 PRD/design、下列契约和 `tests/` 共同验证。
 
 ## Pre-Development Checklist
 

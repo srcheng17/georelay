@@ -310,13 +310,30 @@ class AdapterTest(unittest.TestCase):
     def test_lookup_validates_entire_batch_and_never_returns_foreign_identity(self, upstream):
         first = self.adapter.reverse(LAT, LON)
         calls = upstream.call_count
-        for value, status in [("N-1,N-999", 404), ("N12", 422), ("W-1", 422), ("R20", 422),
+        for value, status in [("N12,N-1,N-999", 404), ("W-1", 422), ("R-20", 422),
                               ("N-0", 400), ("N-01", 400), ("N-9223372036854775808", 400),
+                              ("N0", 400), ("W01", 400), ("R9223372036854775808", 400),
+                              ("N" + "9" * 100, 400), ("N+1", 400), ("N１", 400),
                               ("N-1,", 400), ("n-1", 400), ("N-1," * 50 + "N-1", 400)]:
             self.error(status, self.adapter.lookup, value)
         self.assertEqual(upstream.call_count, calls)
         self.assertEqual(self.adapter.lookup("N-1,N-1"), [first])
         self.assertEqual(self.adapter.lookup(""), [])
+
+    @patch("adapter.server.upstream", return_value=AMAP)
+    def test_lookup_skips_positive_history_and_refreshes_local_ids_in_request_order(self, upstream):
+        first = self.adapter.reverse(LAT, LON)
+        second = self.adapter.reverse("39.9", LON)
+        self.expire()
+        upstream.reset_mock()
+        refreshed = self.adapter.lookup("W123,N-2,N12,R20,N-1,N-2", "en")
+        self.assertEqual(refreshed, [second, first])
+        self.assertEqual(upstream.call_count, 2)
+        self.assertEqual({call.args[0] for call in upstream.call_args_list}, {"amap"})
+        upstream.reset_mock()
+        self.assertEqual(self.adapter.lookup(f"N12,W123,R{server.MAX_ID}"), [])
+        self.assertEqual(self.adapter.lookup("N12,W123,R20", provider="osm"), [])
+        upstream.assert_not_called()
 
     @patch("adapter.server.upstream", return_value=AMAP)
     def test_cache_missing_key_and_upstream_failures_never_become_unknown(self, upstream):
@@ -439,6 +456,43 @@ class AdapterTest(unittest.TestCase):
         self.assertEqual([(item["osm_id"], item["lat"], item["lon"]) for item in refreshed],
                          [(item["osm_id"], item["lat"], item["lon"]) for item in originals])
 
+    def test_fifty_cold_mainland_lookups_finish_with_bounded_parallelism(self):
+        with patch("adapter.server.upstream", return_value=AMAP):
+            originals = [self.adapter.reverse(f"39.{index:06d}", LON) for index in range(50)]
+        requested = list(reversed(originals))
+        ids = ",".join("N" + str(item["osm_id"]) for item in requested)
+        self.adapter.lookup_timeout = 1
+        self.adapter.baidu_ak, self.adapter.baidu_sk = "yourak", "yoursk"
+        # Fifty serial 35ms responses exceed this batch budget.
+        self.assertGreater(50 * 0.035, self.adapter.lookup_timeout)
+        for provider, payload in [("amap", AMAP), ("baidu", BAIDU)]:
+            with self.subTest(provider=provider):
+                self.adapter.mainland_provider = provider
+                self.expire()
+                active = peak = 0
+                lock = threading.Lock()
+                def delayed(*args):
+                    nonlocal active, peak
+                    with lock:
+                        active += 1
+                        peak = max(peak, active)
+                    try:
+                        time.sleep(0.035 if int(args[2][-1]) % 2 else 0.045)
+                        return payload
+                    finally:
+                        with lock:
+                            active -= 1
+                started = time.monotonic()
+                with patch("adapter.server.upstream", side_effect=delayed) as upstream:
+                    refreshed = self.adapter.lookup(ids, "en")
+                self.assertLess(time.monotonic() - started, self.adapter.lookup_timeout)
+                self.assertEqual(upstream.call_count, 50)
+                self.assertEqual({call.args[0] for call in upstream.call_args_list}, {provider})
+                self.assertGreater(peak, 1)
+                self.assertLessEqual(peak, 4)
+                self.assertEqual([(item["osm_id"], item["lat"], item["lon"]) for item in refreshed],
+                                 [(item["osm_id"], item["lat"], item["lon"]) for item in requested])
+
     def test_osm_batch_rejects_missing_duplicate_and_unrequested_identity(self):
         with patch.object(self.adapter, "osm", return_value=OSM):
             self.adapter.reverse(OSM_LAT, OSM_LON, "fr")
@@ -549,18 +603,64 @@ class AdapterTest(unittest.TestCase):
 
     @patch("adapter.server.upstream", return_value=AMAP)
     def test_entire_lookup_has_one_budget_and_returns_no_partial_list(self, upstream):
-        self.adapter.reverse(LAT, LON)
-        self.adapter.reverse("39.9", LON)
+        for index in range(50):
+            self.adapter.reverse(f"39.{index:06d}", LON)
         self.expire()
         self.adapter.lookup_timeout = 0.12
-        budgets = []
+        workers, budgets = [], []
+        release = threading.Event()
         def slow(*args):
-            budgets.append(args[-1])
-            time.sleep(0.075)
+            workers.append(threading.current_thread())
+            budgets.append(args[6])
+            release.wait(timeout=2)
             return AMAP
         upstream.side_effect = slow
-        self.error(504, self.adapter.lookup, "N-1,N-2")
-        self.assertLess(budgets[1], budgets[0])
+        started = time.monotonic()
+        try:
+            with patch.object(self.adapter, "address", wraps=self.adapter.address) as address:
+                self.error(504, self.adapter.lookup, ",".join(f"N-{index}" for index in range(1, 51)))
+                self.assertLess(time.monotonic() - started, 0.4)
+                self.assertEqual(address.call_count, 4)
+        finally:
+            release.set()
+            for worker in workers:
+                worker.join(timeout=1)
+                self.assertFalse(worker.is_alive())
+        self.assertEqual(len(budgets), 4)  # Queued work must not start after timeout.
+        self.assertTrue(all(0 < budget <= self.adapter.lookup_timeout for budget in budgets))
+        with self.adapter.connect() as db:
+            self.assertEqual(db.execute("SELECT count(*) FROM cache WHERE expires>0").fetchone()[0], 0)
+
+    @patch("adapter.server.upstream", return_value=AMAP)
+    def test_lookup_cancels_queued_requests_when_a_nonfirst_item_fails(self, upstream):
+        originals = [self.adapter.reverse(f"39.{index:06d}", LON) for index in range(50)]
+        first_wave = {item["lat"] for item in originals[:4]}
+        ready, release = threading.Barrier(4), threading.Event()
+        workers = []
+        def request(*args):
+            workers.append(threading.current_thread())
+            if args[2] in first_wave:
+                ready.wait(timeout=1)
+            if args[2] == originals[0]["lat"]:
+                release.wait(timeout=0.3)
+            elif args[2] == originals[1]["lat"]:
+                raise server.AdapterError(502, "Upstream request failed")
+            else:
+                time.sleep(0.005)
+            return AMAP
+        upstream.side_effect = request
+        upstream.reset_mock()
+        started = time.monotonic()
+        try:
+            self.error(502, self.adapter.lookup, ",".join(f"N-{index}" for index in range(1, 51)), "en", "amap")
+            self.assertLessEqual(upstream.call_count, 8)  # Allow in-flight scheduling races.
+            self.assertLess(time.monotonic() - started, 0.25)
+        finally:
+            release.set()
+            for worker in set(workers):
+                worker.join(timeout=1)
+                self.assertFalse(worker.is_alive())
+        self.assertLessEqual(upstream.call_count, 8)
 
     def test_real_http_upstream_conversion_osm_coordinates_redirect_and_size(self):
         mock = ThreadingHTTPServer(("127.0.0.1", 0), MockHTTP)
@@ -659,8 +759,11 @@ class AdapterTest(unittest.TestCase):
             self.assertEqual(upstream.call_count, 0)
             result = get(f"/reverse?lat={LAT}&lon={LON}&format=jsonv2", **{"Accept-Language": "ZH-CN"})
             self.assertEqual(get("/lookup?osm_ids=N-1", **{"Accept-Language": "zh-cn"}), [result])
+            self.assertEqual(get("/lookup?osm_ids=N123,W456,R789"), [])
+            self.assertEqual(get("/lookup?osm_ids=W456,N-1,R789", **{"Accept-Language": "zh-cn"}), [result])
+            self.assertEqual(upstream.call_count, 1)
             for path, status in [("/reverse?lat=nan&lon=2", 400), ("/reverse?lat=1&lat=2&lon=3", 400),
-                                 ("/lookup", 400), ("/lookup?osm_ids=N123", 422),
+                                 ("/lookup", 400), ("/lookup?osm_ids=W-1", 422),
                                  ("/lookup?osm_ids=N-999", 404), ("/missing", 404),
                                  (f"/reverse?lat={LAT}&lon={LON}&provider=auto", 400),
                                  (f"/reverse?lat={LAT}&lon={LON}&provider=", 400),
