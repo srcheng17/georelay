@@ -9,3 +9,5 @@
 7. Commit scoped Conventional Commits; archive/record only this task. Push independent branch, open PR with summary and Test plan, inspect actual checks. Never merge/enable auto-merge.
 
 Ownership: implement agent owns .github/workflows/ci.yml, .github/workflows/image-retention.yml, new scripts and tests. Parent owns README.md, README.zh-CN.md, docs/AMAP.md, .trellis/spec/backend and task artifacts. Both share the isolated worktree; do not revert each other's changes.
+
+8. Concurrent main advance: sync only into this feature branch, preserve GeoRelay runtime/branding changes, align retention with current publisher names/tags, and require legal/modification input builds. Repeat affected full-scope review and CI before PR completion.

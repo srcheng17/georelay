@@ -26,3 +26,15 @@ The local GitHub credential cannot access the package-version inventory endpoint
 Trellis check reviewed all changed code, tests, documentation and specs; no findings or fixes. Independent full suite: 78 tests passed (42.157 seconds). Whitespace, actionlint, bash syntax and Python compilation passed; no configured Python type checker.
 
 Actual native amd64/arm64 and ExUnit results will be checked and reported on the final PR. No live retention apply is part of this validation.
+
+## Concurrent main advance
+
+Main advanced from add92b0 to 3e6cbfa while this isolated optimization was being implemented; another session renamed the repository and publication artifacts to GeoRelay. The earlier two-group preview covers legacy packages. Retention now targets georelay/georelay-adapter and -georelay- tags; legacy packages stay untouched. Root legal/modification inputs require full builds. The alias-based CLI preview did not produce a package plan; local package REST access is separately unavailable.
+
+- GeoRelay integration full suite: 87 tests passed (45.585 seconds): 68 current baseline, 7 CI, 12 retention.
+- Added cross-boundary regression executes the actual publisher with the existing fake Docker harness and compares its package/tag outputs with retention. Legal-file Git transitions and legacy preservation pass.
+- Fresh anonymous GET preview: both GeoRelay packages have 4 public tags and 1 matching complete release group. Both latest indexes match their version index byte-for-byte; amd64/arm64 architecture tags match the index's child digests. No group is eligible at keep=10.
+- Concurrent main run 37043924235 passed both native builds, verify and publish. This proves the imported main baseline; our optimization still requires its own PR run.
+- Fresh full-scope integration review: no findings/fixes; independent 87-test suite passed (45.766 seconds), actionlint/whitespace/compile/bash checks passed.
+- Canonical GeoRelay retention CLI was also run in default preview mode and stopped safely without a REST plan under the limited local credential. No live apply.
+- Final native PR CI will be reported on the PR.

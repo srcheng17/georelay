@@ -71,7 +71,7 @@ elif args[:3] == ["buildx", "imagetools", "inspect"]:
     if os.environ.get("FAKE_FAIL_LATEST_READ") and args[-1].endswith(":latest"):
         sys.exit(1)
     print(state["indexes"][args[-1]])
-    if "teslamate-amap-adapter:" in args[-1] and not args[-1].endswith(":latest"):
+    if "georelay-adapter:" in args[-1] and not args[-1].endswith(":latest"):
         for ref, sha in json.loads(os.environ.get("FAKE_REMOTE_UPDATE", "{}" )).items():
             subprocess.run(["git", "--git-dir", os.environ["FAKE_ORIGIN"], "update-ref", ref, sha], check=True)
 '''
@@ -151,7 +151,7 @@ class PublicationTests(unittest.TestCase):
             "GITHUB_SHA": self.git("rev-parse", "HEAD"),
             "GITHUB_REF": "refs/heads/main",
             "GITHUB_EVENT_NAME": "push",
-            "GITHUB_REPOSITORY": "example/teslamate",
+            "GITHUB_REPOSITORY": "example/georelay",
             "GITHUB_ACTOR": "isolated-test",
             "GHCR_TOKEN": "fake-test-only",
             "GITHUB_STEP_SUMMARY": str(self.directory / "summary.md"),
@@ -183,8 +183,8 @@ class PublicationTests(unittest.TestCase):
         self.assertTrue(indexes[0] < version_reads[0] < indexes[1] < version_reads[1] < indexes[2] < indexes[3])
         self.assertTrue(all("stable" not in str(command) for command in commands))
         state = json.loads(self.state.read_text())
-        version = json.loads((self.repo / "upstream.json").read_text())["tag"] + "-amap-" + self.git("rev-parse", "HEAD")
-        for package in ("ghcr.io/example/teslamate-amap", "ghcr.io/example/teslamate-amap-adapter"):
+        version = json.loads((self.repo / "upstream.json").read_text())["tag"] + "-georelay-" + self.git("rev-parse", "HEAD")
+        for package in ("ghcr.io/example/georelay", "ghcr.io/example/georelay-adapter"):
             self.assertEqual(state["indexes"][package + ":latest"], state["indexes"][package + ":" + version])
 
     def test_publication_failure_stops_before_indexes(self):
@@ -201,7 +201,7 @@ class PublicationTests(unittest.TestCase):
         self.assertEqual(commands, [])
 
     def test_either_version_index_failure_prevents_any_latest_promotion(self):
-        for package in ("teslamate-amap", "teslamate-amap-adapter"):
+        for package in ("georelay", "georelay-adapter"):
             for failure in ("FAKE_FAIL_VERSION_INDEX", "FAKE_BAD_VERSION_INDEX"):
                 with self.subTest(package=package, failure=failure):
                     result, commands = self.publish(**{failure: package})
@@ -209,13 +209,13 @@ class PublicationTests(unittest.TestCase):
                     self.assertEqual(self.latest_commands(commands), [])
 
     def test_latest_copy_or_content_failure_is_not_reported_as_success(self):
-        for package in ("teslamate-amap", "teslamate-amap-adapter"):
+        for package in ("georelay", "georelay-adapter"):
             for failure in ("FAKE_FAIL_LATEST", "FAKE_BAD_LATEST"):
                 with self.subTest(package=package, failure=failure):
                     result, commands = self.publish(**{failure: package})
                     self.assertNotEqual(result.returncode, 0)
                     latest = self.latest_commands(commands)
-                    self.assertEqual(len(latest), 1 if package == "teslamate-amap" else 2)
+                    self.assertEqual(len(latest), 1 if package == "georelay" else 2)
         result, commands = self.publish(FAKE_FAIL_LATEST_READ="1")
         self.assertNotEqual(result.returncode, 0)
         self.assertEqual(len(self.latest_commands(commands)), 1)
@@ -263,7 +263,7 @@ class PublicationTests(unittest.TestCase):
     def test_actual_ci_nonroot_check_rejects_failed_empty_or_invalid_uid(self):
         workflow = (ROOT / ".github/workflows/ci.yml").read_text()
         loop = re.search(
-            r"(?ms)^          for image in amap-adapter teslamate-amap; do\n.*?^          done$", workflow
+            r"(?ms)^          for image in georelay-adapter georelay; do\n.*?^          done$", workflow
         ).group(0)
         for overrides, expected in (
             ({"FAKE_UID_OUTPUT": "10001"}, 0),

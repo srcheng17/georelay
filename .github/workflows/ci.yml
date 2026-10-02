@@ -71,29 +71,29 @@ jobs:
         id: version
         run: |
           tag=$(python3 -c 'import json; print(json.load(open("upstream.json"))["tag"])')
-          echo "value=${tag}-amap-${GITHUB_SHA}" >> "$GITHUB_OUTPUT"
+          echo "value=${tag}-georelay-${GITHUB_SHA}" >> "$GITHUB_OUTPUT"
       - name: Build adapter and patched TeslaMate
         env:
           IMAGE_VERSION: ${{ steps.version.outputs.value }}
           IMAGE_ARCHITECTURE: ${{ matrix.architecture }}
         run: |
           labels=(--label "org.opencontainers.image.source=https://github.com/$GITHUB_REPOSITORY" --label "org.opencontainers.image.revision=$GITHUB_SHA" --label "org.opencontainers.image.version=$IMAGE_VERSION")
-          docker build --platform "linux/$IMAGE_ARCHITECTURE" "${labels[@]}" --label 'org.opencontainers.image.title=TeslaMate AMap adapter (independent companion)' -t amap-adapter:checked adapter
-          docker build --platform "linux/$IMAGE_ARCHITECTURE" "${labels[@]}" --label 'org.opencontainers.image.title=TeslaMate (modified: configurable geocoder URL)' -t teslamate-amap:checked "$RUNNER_TEMP/teslamate-upstream"
-          for image in amap-adapter teslamate-amap; do
+          docker build --platform "linux/$IMAGE_ARCHITECTURE" "${labels[@]}" --label 'org.opencontainers.image.title=GeoRelay address adapter' -t georelay-adapter:checked adapter
+          docker build --platform "linux/$IMAGE_ARCHITECTURE" "${labels[@]}" --label 'org.opencontainers.image.title=GeoRelay' -t georelay:checked "$RUNNER_TEMP/teslamate-upstream"
+          for image in georelay-adapter georelay; do
             test "$(docker image inspect --format '{{.Os}}/{{.Architecture}}' "$image:checked")" = "linux/$IMAGE_ARCHITECTURE"
             uid=$(docker run --rm --entrypoint id "$image:checked" -u)
             [[ $uid =~ ^[1-9][0-9]*$ ]] || exit 1
           done
-          docker run --rm --entrypoint /bin/sh teslamate-amap:checked -c 'test -s /usr/share/doc/teslamate/LICENSE && test -s /usr/share/doc/teslamate/NOTICE'
-          docker run --rm --entrypoint /bin/sh amap-adapter:checked -c 'test -s /usr/share/doc/amap-adapter/LICENSE'
+          docker run --rm --entrypoint /bin/sh georelay:checked -c 'test -r /usr/share/doc/teslamate/LICENSE && test -s /usr/share/doc/teslamate/NOTICE && test -s /usr/share/doc/teslamate/TRADEMARK.md && test -s /usr/share/doc/teslamate/MODIFICATIONS.md'
+          docker run --rm --entrypoint /bin/sh georelay-adapter:checked -c 'test -r /usr/share/doc/georelay-adapter/LICENSE && test -s /usr/share/doc/georelay-adapter/MODIFICATIONS.md'
       - name: Adapter container health without a key or host port
         run: |
           container="amap-check-${GITHUB_RUN_ID}-${GITHUB_RUN_ATTEMPT}"
           volume="${container}-data"
           trap 'docker rm -f "$container" >/dev/null 2>&1 || true; docker volume rm "$volume" >/dev/null 2>&1 || true' EXIT
           docker volume create "$volume"
-          docker run -d --name "$container" --network none --mount "type=volume,source=$volume,target=/data" amap-adapter:checked
+          docker run -d --name "$container" --network none --mount "type=volume,source=$volume,target=/data" georelay-adapter:checked
           healthy=false
           for attempt in $(seq 1 20); do
             if docker exec "$container" python -c 'import json, urllib.request; assert json.load(urllib.request.urlopen("http://127.0.0.1:8080/health", timeout=2)) == {"status": "ok"}' >/dev/null 2>&1; then
@@ -107,7 +107,7 @@ jobs:
         if: (github.event_name == 'push' && github.ref == 'refs/heads/main') || (github.event_name == 'workflow_dispatch' && inputs.publish)
         env:
           IMAGE_ARCHITECTURE: ${{ matrix.architecture }}
-        run: docker save -o "$RUNNER_TEMP/checked-images-$IMAGE_ARCHITECTURE.tar" amap-adapter:checked teslamate-amap:checked
+        run: docker save -o "$RUNNER_TEMP/checked-images-$IMAGE_ARCHITECTURE.tar" georelay-adapter:checked georelay:checked
       - uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02 # v4
         if: (github.event_name == 'push' && github.ref == 'refs/heads/main') || (github.event_name == 'workflow_dispatch' && inputs.publish)
         with:

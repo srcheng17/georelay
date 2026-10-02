@@ -8,6 +8,8 @@
 
 固定 `upstream.json` 中稳定 tag 和解引用 commit，下载到临时/忽略目录；先校验 commit 再 `git apply --check`，任何失败停止。保留上游 LICENSE/NOTICE。GitHub release 检测自动创建仅 pin 变更的上游分支与 PR，并显式触发双架构构建；影响镜像的 main push 或受控上游分支 dispatch 通过全部校验后自动发布版本镜像。仅文档、agent/Paseo/Trellis 设置改动运行轻量检查，手动 dispatch 始终完整构建。上游分支必须与 main 相比仅改 upstream.json，并匹配稳定 tag；不自动合并 PR。两架构都检查成功才从已测试产物发布索引，保留单名 verify 汇总检查，不得绕过测试。不自动部署、不自动提升 stable、不 force push。
 
+共享prepare路径在应用补丁前逐字核对LICENSE/NOTICE/TRADEMARK.md与仓库复核原文；缺失或变化停止，人工复核后更新随附文件。修改通知含相关日期并进入两个镜像，发布检查验证可读。GeoRelay是独立公开名称，镜像为georelay和georelay-adapter，保留旧包但不向其发布新版本；上游命名/图标变化需重新审查品牌补丁，不能静默跳过。修改版保留内部模块、数据库和MQTT兼容标识，不借重构改动数据契约。
+
 用户已授权维护两镜像的 `latest`。所有发布任务共用 publish job concurrency group；先验证两个版本索引，再复制已测试索引至 latest，不重新构建。推广前回读官方最新稳定版和源码状态，旧 pin 或过期源码跳过推广，网络/校验失败停止；GitHub 队列不保证 FIFO，不能仅凭串行认为版本不会倒退。每个 latest 必须回读为对应版本的同一双架构内容。两个 package 没有原子更新，任一推广或回读失败使 workflow 失败，不能报告双镜像完成。保留固定版本/digest用法；latest本身不会拉取或重建运行容器。
 
 改动最少的必要文件，不引入框架/ORM/插件层。构建流程本身要有失败测试。新增测试路径必须与 workflow 和 README 命令一致。
@@ -41,8 +43,8 @@ README 按使用者需要组织用途、功能和使用入口，验收数字、P
 ### 3. Contracts
 
 - Python/空白 checks 必须成功。verify 总是出现；image_required=true 只接受 build success，false 只接受 build skipped。缺失/非法输出或失败/取消都拒绝。
-- 只有确认全为轻量路径的变更可跳过；运行代码、补丁、pin、测试、构建/发布和未知路径完整构建。删除/重命名的旧新路径都计入。dispatch 始终构建。
-- 保留两个 package 都完整的最新十组 `vMAJOR.MINOR.PATCH-amap-<40hex>`、latest 与其全部引用。完整组的两个索引必须各含且仅含 linux/amd64、linux/arm64，digest 匹配相应架构标签和版本记录。
+- 只有确认全为轻量路径的变更可跳过；运行代码、补丁、pin、测试、构建/发布和未知路径完整构建。`MODIFICATIONS.md` 与 `TRADEMARK.md` 是镜像或法律验证输入，必须完整构建。删除/重命名的旧新路径都计入。dispatch 始终构建。
+- 保留 publisher 当前使用的两个 package（仓库小写名称和名称加 `-adapter`）都完整的最新十组 `vMAJOR.MINOR.PATCH-georelay-<40hex>`、latest 与其全部引用。旧 teslamate-amap 包不再发布新版本，本策略保留原状。完整组的两个索引必须各含且仅含 linux/amd64、linux/arm64，digest 匹配相应架构标签和版本记录。
 - 以完整发布组的创建时间排序；latest 单独保护，不能用其更新时间替代版本排序。其他保留标签、共享子镜像、不完整/未知组及未关联无标签记录同样不得误删。
 - 两个 package 的全部读取与计划验证完成后才允许 DELETE；先删旧索引再删不再被保留引用的子镜像。读取/解析失败在写入前停止，DELETE 失败停止后续删除。
 - 清理 JSON 报告含 `mode`、`repository`、`keep_releases=10`、`complete_releases`、`incomplete_releases`、`retained_releases`、`candidate_releases`，以及每个 package 的 `versions/protected/latest/delete`；delete 条目是 `id/digest/kind`。REST 清单每页 100 条，最多 200 页，重复 id/digest/tag 或无时区创建时间均拒绝。

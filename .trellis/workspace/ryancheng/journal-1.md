@@ -281,6 +281,20 @@ Added metadata-only CI gating with required verify and dual-architecture validat
 ### Main Changes
 
 - CI gating and conservative grouped GHCR retention with offline regression coverage
+## Session 9: latest 双镜像发布验收
+<!-- trellis-session: v=2 fp=33fa07c448fecb2b -->
+
+**Date**: 2026-10-03
+**Task**: latest 双镜像发布验收
+**Branch**: `feat/amap-adapter`
+
+### Summary
+
+PR #2 正常合并，main CI 37034259606 双架构、verify、publish全部成功；两个latest与固定版本索引相同，四次实际匿名拉取和OCI回读通过，发布源码2db4c204578aa14d4c3fb9441ead72304af3f3a3。
+
+### Main Changes
+
+- 发布任务串行、官方版本和源码新鲜度守卫、按已测试digest复制latest；双语入口默认latest。
 
 ### Git Commits
 
@@ -291,6 +305,12 @@ Added metadata-only CI gating with required verify and dual-architecture validat
 ### Testing
 
 - [OK] 78 Python tests, actionlint, compilation, shell syntax, whitespace and documentation links passed
+| `38d9bad` | ci: promote verified multiarch images to latest |
+| `faefae6` | docs: record verified latest image release |
+
+### Testing
+
+- [OK] 本地全仓62项通过；云端两架构各62项、上游及镜像检查通过；空Docker配置四个平台拉取通过，临时镜像清理。
 
 ### Status
 
@@ -299,3 +319,4 @@ Added metadata-only CI gating with required verify and dual-architecture validat
 ### Next Steps
 
 - Inspect native PR checks; await explicit user instruction before merging
+- Paseo PR合并后自动归档曾中断会话，已只读确认原因；不修改生产服务。

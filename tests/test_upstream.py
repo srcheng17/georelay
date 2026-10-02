@@ -27,7 +27,20 @@ class PrepareUpstreamTests(unittest.TestCase):
         upstream.git(self.source, "config", "user.name", "Fixture")
         upstream.git(self.source, "config", "user.email", "fixture@example.invalid")
         (self.source / "value").write_text("before\n")
-        upstream.git(self.source, "add", "value")
+        (self.source / "Dockerfile").write_text("FROM scratch\n")
+        for name in upstream.LEGAL_FILES:
+            (self.source / name).write_bytes((upstream.ROOT / name).read_bytes())
+        for name in (*upstream.BRANDED_ASSETS, "robots.txt"):
+            asset = self.source / "elixir/priv/static" / name
+            asset.parent.mkdir(parents=True, exist_ok=True)
+            asset.write_text("fixture asset\n")
+        layout = self.source / "elixir/lib/teslamate_web/templates/layout/root.html.heex"
+        layout.parent.mkdir(parents=True)
+        layout.write_text(
+            '<.live_title suffix=" · GeoRelay" /><strong>GeoRelay</strong>\n'
+            'https://github.com/srcheng17/georelay\n' + upstream.DISCLAIMER + '\n'
+        )
+        upstream.git(self.source, "add", ".")
         upstream.git(self.source, "commit", "--quiet", "-m", "fixture")
         upstream.git(self.source, "tag", "v4.3.0")
         self.pin = {
@@ -60,6 +73,68 @@ class PrepareUpstreamTests(unittest.TestCase):
         self.prepare()
         self.assertEqual((self.destination / "value").read_text(), "after\n")
         self.assertEqual(upstream.git(self.destination, "rev-parse", "HEAD"), self.pin["commit"])
+        for name in upstream.LEGAL_FILES:
+            self.assertEqual(
+                (self.destination / name).read_bytes(), (upstream.ROOT / name).read_bytes()
+            )
+        self.assertEqual(
+            (self.destination / "MODIFICATIONS.md").read_bytes(),
+            (upstream.ROOT / "MODIFICATIONS.md").read_bytes(),
+        )
+        self.assertIn(
+            "COPY --chmod=444 MODIFICATIONS.md TRADEMARK.md /usr/share/doc/teslamate/",
+            (self.destination / "Dockerfile").read_text(),
+        )
+        static = self.destination / "elixir/priv/static"
+        self.assertEqual((static / "favicon.svg").read_bytes(), (upstream.ROOT / "branding/favicon.svg").read_bytes())
+        self.assertEqual(
+            {p.relative_to(static).as_posix() for p in static.rglob("*") if p.is_file()},
+            {"favicon.svg", "robots.txt"},
+        )
+
+    def test_changed_or_missing_legal_text_stops_before_patch(self):
+        for name in upstream.LEGAL_FILES:
+            for missing in (False, True):
+                with self.subTest(name=name, missing=missing):
+                    upstream.git(self.source, "reset", "--hard", self.pin["commit"])
+                    legal = self.source / name
+                    if missing:
+                        legal.unlink()
+                    else:
+                        # A newline-only change must not be normalized away.
+                        legal.write_bytes(legal.read_bytes().replace(b"\n", b"\r\n"))
+                    upstream.git(self.source, "add", ".")
+                    upstream.git(self.source, "commit", "--quiet", "-m", "legal change")
+                    upstream.git(self.source, "tag", "--force", "v4.3.0")
+                    pin = dict(self.pin, commit=upstream.git(self.source, "rev-parse", "HEAD"))
+                    self.pin_path.write_text(json.dumps(pin))
+                    destination = self.root / (name + ("-missing" if missing else "-changed"))
+                    with self.assertRaisesRegex(ValueError, name + ".*manual review"):
+                        upstream.prepare(destination, self.pin_path, self.patches)
+                    self.assertEqual((destination / "value").read_text(), "before\n")
+                    self.assertEqual((destination / "Dockerfile").read_text(), "FROM scratch\n")
+                    self.assertFalse((destination / "MODIFICATIONS.md").exists())
+                    self.assertEqual(upstream.git(destination, "status", "--porcelain"), "")
+
+    def test_unreviewed_static_asset_stops_before_patch(self):
+        (self.source / "elixir/priv/static/new-logo.svg").write_text("unreviewed")
+        upstream.git(self.source, "add", ".")
+        upstream.git(self.source, "commit", "--quiet", "-m", "new static asset")
+        upstream.git(self.source, "tag", "--force", "v4.3.0")
+        self.pin["commit"] = upstream.git(self.source, "rev-parse", "HEAD")
+        self.pin_path.write_text(json.dumps(self.pin))
+        with self.assertRaisesRegex(ValueError, "manual branding review"):
+            self.prepare()
+        self.assertEqual((self.destination / "value").read_text(), "before\n")
+        self.assertEqual(upstream.git(self.destination, "status", "--porcelain"), "")
+
+    def test_unreviewed_translated_app_name_is_rejected(self):
+        self.prepare()
+        catalog = self.destination / "elixir/priv/gettext/fixture/LC_MESSAGES/default.po"
+        catalog.parent.mkdir(parents=True)
+        catalog.write_text('msgid "Welcome to TeslaMate"\nmsgstr ""\n')
+        with self.assertRaisesRegex(ValueError, "unreviewed application branding"):
+            upstream.stage_branding(self.destination)
 
     def test_moved_tag_stops_before_checkout_and_patch(self):
         self.pin["commit"] = "0" * 40

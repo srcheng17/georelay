@@ -20,7 +20,7 @@ from update_release import command
 
 
 KEEP_RELEASES = 10
-RELEASE = re.compile(r"(v(?:0|[1-9]\d*)\.(?:0|[1-9]\d*)\.(?:0|[1-9]\d*)-amap-[0-9a-f]{40})(?:-(amd64|arm64))?")
+RELEASE = re.compile(r"(v(?:0|[1-9]\d*)\.(?:0|[1-9]\d*)\.(?:0|[1-9]\d*)-georelay-[0-9a-f]{40})(?:-(amd64|arm64))?")
 INDEX_TYPES = {"application/vnd.oci.image.index.v1+json", "application/vnd.docker.distribution.manifest.list.v2+json"}
 IMAGE_TYPES = {"application/vnd.oci.image.manifest.v1+json", "application/vnd.docker.distribution.manifest.v2+json"}
 
@@ -40,7 +40,7 @@ def response_bytes(url, headers):
 
 @lru_cache
 def registry_token(owner, package):
-    headers = {"User-Agent": "teslamate-amap-retention"}
+    headers = {"User-Agent": "georelay-retention"}
     credential = os.environ.get("GITHUB_TOKEN") or os.environ.get("GH_TOKEN")
     if credential:
         actor = os.environ.get("GITHUB_ACTOR") or owner
@@ -56,7 +56,7 @@ def registry_manifest(owner, package, digest):
     raw = response_bytes("https://ghcr.io/v2/" + owner.lower() + "/" + package + "/manifests/" + digest, {
         "Authorization": "Bearer " + registry_token(owner, package),
         "Accept": ", ".join(sorted(INDEX_TYPES | IMAGE_TYPES)),
-        "User-Agent": "teslamate-amap-retention",
+        "User-Agent": "georelay-retention",
     })
     if "sha256:" + hashlib.sha256(raw).hexdigest() != digest:
         raise ValueError("Registry manifest does not match the inventory digest")
@@ -153,7 +153,7 @@ def plan_retention(repository, api=github, fetch=registry_manifest):
         raise ValueError("Unsupported repository owner")
     prefix = ("users/" if owner_type == "User" else "orgs/") + owner + "/packages/container/"
     packages, groups = {}, set()
-    for package in (name.lower() + "-amap", name.lower() + "-amap-adapter"):
+    for package in (name.lower(), name.lower() + "-adapter"):
         endpoint = prefix + package
         metadata = api("GET", endpoint)
         if (metadata["name"] != package or metadata["package_type"] != "container"

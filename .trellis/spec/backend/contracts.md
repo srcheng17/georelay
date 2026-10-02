@@ -21,11 +21,13 @@
 
 AMap regeo请求 `extensions=all`。name优先 `regeocode.aois[0].name` → `pois[0].name` →建筑→小区→道路→完整地址；缺失/空数组/非字符串须规范化，详情列表及首项错误结构不得异常。只取供应商排序的首项，不遍历任意周边地点。`name` 与 `namedetails.name` 一致，不能用道路替代已返回的AOI/POI。文字随TTL正常刷新，身份不变。
 
-OSM刷新按可信来源批量lookup，不盲转外部正ID。按type/id集合匹配而非zip；拒绝缺项/重复/额外项，同一来源展开多个本地身份。公共OSM用NOMINATIM_USER_AGENT、缓存与本地卷flock，每次完成后至少间隔1秒。
+OSM刷新按可信来源批量lookup，不盲转外部正ID。按type/id集合匹配而非zip；拒绝缺项/重复/额外项，同一来源展开多个本地身份。合法正数历史身份在外部lookup跳过，不访问OSM；全正返回空列表。公共OSM用NOMINATIM_USER_AGENT、缓存与本地卷flock，每次完成后至少间隔1秒。
 
-AMAP_KEY/AMAP_KEY_FILE只给sidecar且互斥；ADAPTER_DB永久卷；缓存默认86400秒；网络默认8秒，无重试；reverse总预算min(25,2*timeout+1)，lookup默认20秒。真实Key不属于自动测试。
+AMAP_KEY/AMAP_KEY_FILE只给sidecar且互斥；ADAPTER_DB永久卷；缓存默认86400秒；网络默认8秒，无重试；reverse总预算min(25,2*timeout+1)，lookup默认20秒。lookup复用address以固定4线程并发，共享deadline；FIRST_EXCEPTION观察任意项失败并取消排队任务，不能按输入顺序等待而遮住后续失败。成功结果仍按输入顺序返回；OSM限流不放宽。真实Key不属于自动测试。
 
 NOMINATIM_BASE_URL是新增补丁变量，默认官方OSM。只接受HTTP/HTTPS origin，可含端口/尾斜杠；禁止userinfo/path/query/fragment。Geocoder和专用Finch pool调用同一校验函数，保留size3和NOMINATIM_PROXY。测试实际signed bigint负数入库，不只看Ecto类型。
+
+NOMINATIM_LOCAL_IDENTITIES_ONLY严格true/false，缺省false保留默认及自托管OSM缺项reverse回退；连接本adapter时设true。true模式缺少本地负身份明确失败，跳过缺项正身份。显式refresh写回name/road/house_number/postcode/raw及行政字段，保持数据库id/osm身份/坐标/关联；sidecar TTL不自动更新PostgreSQL，find_address同身份复用逻辑不变。
 
 ## 4. Validation & Error Matrix
 
@@ -33,7 +35,8 @@ NOMINATIM_BASE_URL是新增补丁变量，默认官方OSM。只接受HTTP/HTTPS 
 | --- | --- |
 | 非有限/越界坐标、非法格式/重复参数/超50身份 | 400 |
 | 本地身份或端点不存在 | 404 |
-| 正数历史身份、非node负身份 | 422 |
+| 合法正数历史身份 | 200，跳过；全正返回[] |
+| 非node负身份 | 422 |
 | 缺配置、SQLite不可用 | 503 |
 | 上游失败/非法或错身份响应 | 502 |
 | 网络、锁或整批预算耗尽 | 504 |

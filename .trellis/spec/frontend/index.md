@@ -1,3 +1,3 @@
 # 前端边界
 
-本仓库当前没有自有前端。高德地址 sidecar 不改变 HedgieMate、Grafana 或 TeslaMate 地图瓦片。MVP 不修改 UI、地图 provider、静态资源或第三方代理；后续底图工作需要独立任务和来源/许可核查。后端变更参见 `../backend/index.md`。
+本仓库没有独立前端。地址 sidecar 不改变客户端地图瓦片。GeoRelay 修改版通过受测上游补丁替换公开应用名称、Logo 和图标，并展示来源及免责声明；此品牌范围不改页面功能、地图 provider 或第三方代理。底图工作需要独立任务和来源/许可核查。后端变更参见 `../backend/index.md`。

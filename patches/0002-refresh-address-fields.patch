@@ -1,0 +1,414 @@
+diff --git a/elixir/lib/teslamate/http.ex b/elixir/lib/teslamate/http.ex
+index 1a79b2e..aaaa484 100644
+--- a/elixir/lib/teslamate/http.ex
++++ b/elixir/lib/teslamate/http.ex
+@@ -90,6 +90,8 @@ defmodule TeslaMate.HTTP do
+   end
+ 
+   def child_spec(_arg) do
++    nominatim_local_identities_only?()
++
+     Finch.child_spec(name: __MODULE__, pools: pools())
+   end
+ 
+@@ -112,4 +114,12 @@ defmodule TeslaMate.HTTP do
+     Finch.build(:post, url, headers, body)
+     |> Finch.request(__MODULE__, opts)
+   end
++
++  def nominatim_local_identities_only? do
++    case System.get_env("NOMINATIM_LOCAL_IDENTITIES_ONLY", "false") do
++      "true" -> true
++      "false" -> false
++      _ -> raise ArgumentError, "NOMINATIM_LOCAL_IDENTITIES_ONLY must be true or false"
++    end
++  end
+ end
+diff --git a/elixir/lib/teslamate/locations.ex b/elixir/lib/teslamate/locations.ex
+index 254f9fa..cce5b95 100644
+--- a/elixir/lib/teslamate/locations.ex
++++ b/elixir/lib/teslamate/locations.ex
+@@ -48,6 +48,8 @@ defmodule TeslaMate.Locations do
+   end
+ 
+   def refresh_addresses(lang) do
++    local_identities_only? = TeslaMate.HTTP.nominatim_local_identities_only?()
++
+     Address
+     |> Repo.all()
+     |> Enum.chunk_every(50)
+@@ -70,13 +72,21 @@ defmodule TeslaMate.Locations do
+               :country,
+               :county,
+               :display_name,
++              :house_number,
++              :name,
+               :neighbourhood,
++              :postcode,
++              :raw,
++              :road,
+               :state,
+               :state_district
+             ])
+ 
+           {:ok, _} = update_address(address, attrs)
+ 
++        {%Address{osm_id: id}, nil} when id > 0 and local_identities_only? ->
++          :ignore
++
+         {%Address{osm_id: id, osm_type: type} = address, nil} ->
+           case Geocoder.reverse_lookup(address.latitude, address.longitude, lang) do
+             {:ok, %{osm_id: ^id, osm_type: ^type} = attrs} ->
+@@ -86,7 +96,12 @@ defmodule TeslaMate.Locations do
+                   :country,
+                   :county,
+                   :display_name,
++                  :house_number,
++                  :name,
+                   :neighbourhood,
++                  :postcode,
++                  :raw,
++                  :road,
+                   :state,
+                   :state_district
+                 ])
+diff --git a/elixir/lib/teslamate/locations/geocoder.ex b/elixir/lib/teslamate/locations/geocoder.ex
+index 5f308ac..cb92e40 100644
+--- a/elixir/lib/teslamate/locations/geocoder.ex
++++ b/elixir/lib/teslamate/locations/geocoder.ex
+@@ -53,7 +53,7 @@ defmodule TeslaMate.Locations.Geocoder do
+     ]
+ 
+     with {:ok, raw_addresses} <- query("/lookup", lang, params) do
+-      addresses =
++      details =
+         Enum.map(raw_addresses, fn attrs ->
+           case into_address(attrs) do
+             {:ok, address} -> address
+@@ -61,7 +61,20 @@ defmodule TeslaMate.Locations.Geocoder do
+           end
+         end)
+ 
+-      {:ok, addresses}
++      requested_local_ids =
++        for %Address{osm_id: id, osm_type: type} <- addresses,
++            is_integer(id) and id < 0,
++            into: MapSet.new(),
++            do: {type, id}
++
++      returned_ids = MapSet.new(details, &{&1.osm_type, &1.osm_id})
++
++      if TeslaMate.HTTP.nominatim_local_identities_only?() and
++           not MapSet.subset?(requested_local_ids, returned_ids) do
++        {:error, :missing_local_address}
++      else
++        {:ok, details}
++      end
+     end
+   catch
+     {:invalid_address, reason} ->
+diff --git a/elixir/test/teslamate/locations/addresses_adapter_test.exs b/elixir/test/teslamate/locations/addresses_adapter_test.exs
+new file mode 100644
+index 0000000..5f52ea1
+--- /dev/null
++++ b/elixir/test/teslamate/locations/addresses_adapter_test.exs
+@@ -0,0 +1,278 @@
++defmodule TeslaMate.Locations.AddressesAdapterTest do
++  use TeslaMate.DataCase, async: false
++
++  alias TeslaMate.{HTTP, Locations, Log}
++  alias TeslaMate.Locations.{Address, Geocoder}
++  alias TeslaMate.Log.{ChargingProcess, Drive}
++
++  import Mock
++  import ExUnit.CaptureLog
++
++  setup do
++    for {key, value} <- [
++          {"NOMINATIM_BASE_URL", "http://amap-adapter:8080"},
++          {"NOMINATIM_LOCAL_IDENTITIES_ONLY", "true"}
++        ] do
++      previous = System.get_env(key)
++      System.put_env(key, value)
++
++      on_exit(fn ->
++        if previous, do: System.put_env(key, previous), else: System.delete_env(key)
++      end)
++    end
++
++    :ok
++  end
++
++  test "local identity mode defaults off and rejects invalid configuration" do
++    System.delete_env("NOMINATIM_LOCAL_IDENTITIES_ONLY")
++    refute HTTP.nominatim_local_identities_only?()
++    System.put_env("NOMINATIM_LOCAL_IDENTITIES_ONLY", "false")
++    refute HTTP.nominatim_local_identities_only?()
++    System.put_env("NOMINATIM_LOCAL_IDENTITIES_ONLY", "true")
++    assert HTTP.nominatim_local_identities_only?()
++
++    for value <- ["", "TRUE", "1", "invalid-secret"] do
++      System.put_env("NOMINATIM_LOCAL_IDENTITIES_ONLY", value)
++      error = assert_raise ArgumentError, fn -> HTTP.child_spec(nil) end
++      assert error.message == "NOMINATIM_LOCAL_IDENTITIES_ONLY must be true or false"
++    end
++  end
++
++  test "mixed lookup refreshes local fields while retaining old identities and references" do
++    old = address_fixture(42, "way")
++    unknown = unknown_fixture()
++    local = address_fixture(-10_001)
++    raw = refreshed_raw(local)
++    {:ok, car} = Log.create_car(%{eid: 42, vid: 42, vin: "refresh-test"})
++    date = ~U[2024-01-01 00:00:00.000000Z]
++    {:ok, position} = Log.insert_position(car, %{date: date, latitude: 39.9, longitude: 116.4})
++
++    drive =
++      Repo.insert!(%Drive{
++        car_id: car.id,
++        start_date: date,
++        start_address_id: old.id,
++        end_address_id: local.id
++      })
++
++    charging =
++      Repo.insert!(%ChargingProcess{
++        car_id: car.id,
++        start_date: date,
++        position_id: position.id,
++        address_id: local.id
++      })
++
++    with_mocks [
++      {GeocoderMock, [], details: &Geocoder.details/2},
++      {Tesla.Adapter.Finch, [],
++       call: fn env, _opts ->
++         assert env.url == "http://amap-adapter:8080/lookup"
++
++         assert MapSet.new(String.split(env.query[:osm_ids], ",")) ==
++                  MapSet.new(["W42", "N-10001"])
++
++         assert Tesla.get_header(env, "Accept-Language") == "zh-CN"
++         {:ok, %{env | status: 200, body: [raw]}}
++       end}
++    ] do
++      assert Locations.refresh_addresses("zh-CN") == :ok
++    end
++
++    assert Repo.get!(Address, old.id) == old
++    assert Repo.get!(Address, unknown.id) == unknown
++    assert_refreshed(local, raw)
++    assert Repo.get!(Drive, drive.id).start_address_id == old.id
++    assert Repo.get!(Drive, drive.id).end_address_id == local.id
++    assert Repo.get!(ChargingProcess, charging.id).address_id == local.id
++    assert Repo.aggregate(Address, :count) == 3
++  end
++
++  test "an empty all-positive lookup is harmless without reverse requests" do
++    old = address_fixture(42)
++
++    with_mocks [
++      {GeocoderMock, [], details: &Geocoder.details/2},
++      {Tesla.Adapter.Finch, [],
++       call: fn env, _opts ->
++         assert env.url == "http://amap-adapter:8080/lookup"
++         assert env.query[:osm_ids] == "N42"
++         {:ok, %{env | status: 200, body: []}}
++       end}
++    ] do
++      assert Locations.refresh_addresses("zh-CN") == :ok
++    end
++
++    assert Repo.all(Address) == [old]
++  end
++
++  test "all Unknown placeholders use an empty lookup without reverse" do
++    unknown = unknown_fixture()
++
++    with_mocks [
++      {GeocoderMock, [], details: &Geocoder.details/2},
++      {Tesla.Adapter.Finch, [],
++       call: fn env, _opts ->
++         assert env.url == "http://amap-adapter:8080/lookup"
++         assert env.query[:osm_ids] == ""
++         {:ok, %{env | status: 200, body: []}}
++       end}
++    ] do
++      assert Locations.refresh_addresses("zh-CN") == :ok
++    end
++
++    assert Repo.all(Address) == [unknown]
++  end
++
++  test "missing or mismatched local identities fail without reverse or partial updates" do
++    local = address_fixture(-10_001)
++    other = address_fixture(-10_003)
++    raw = refreshed_raw(local)
++
++    for body <- [
++          [refreshed_raw(other)],
++          [],
++          [%{raw | "osm_id" => -10_002}],
++          [%{raw | "osm_type" => "way"}]
++        ] do
++      with_mocks [
++        {GeocoderMock, [], details: &Geocoder.details/2},
++        {Tesla.Adapter.Finch, [],
++         call: fn env, _opts ->
++           assert env.url == "http://amap-adapter:8080/lookup"
++           {:ok, %{env | status: 200, body: body}}
++         end}
++      ] do
++        capture_log(fn ->
++          assert Locations.refresh_addresses("zh-CN") == {:error, :missing_local_address}
++        end)
++      end
++
++      assert Repo.get!(Address, local.id) == local
++      assert Repo.get!(Address, other.id) == other
++    end
++  end
++
++  test "default mode retains reverse fallback and refreshes its text fields" do
++    System.put_env("NOMINATIM_LOCAL_IDENTITIES_ONLY", "false")
++    old = address_fixture(42)
++    raw = refreshed_raw(old)
++
++    with_mocks [
++      {GeocoderMock, [], details: &Geocoder.details/2},
++      {Tesla.Adapter.Finch, [],
++       call: fn env, _opts ->
++         body =
++           case env.url do
++             "http://amap-adapter:8080/lookup" -> []
++             "http://amap-adapter:8080/reverse" -> raw
++           end
++
++         {:ok, %{env | status: 200, body: body}}
++       end}
++    ] do
++      assert Locations.refresh_addresses("zh-CN") == :ok
++    end
++
++    assert_refreshed(old, raw)
++  end
++
++  test "find_address reuses an existing identity without refreshing its fields" do
++    local = address_fixture(-10_001)
++    raw = refreshed_raw(local)
++
++    with_mocks [
++      {GeocoderMock, [], reverse_lookup: &Geocoder.reverse_lookup/3},
++      {Tesla.Adapter.Finch, [],
++       call: fn env, _opts ->
++         assert env.url == "http://amap-adapter:8080/reverse"
++         {:ok, %{env | status: 200, body: raw}}
++       end}
++    ] do
++      assert Locations.find_address(%{latitude: 39.9, longitude: 116.4}) == {:ok, local}
++    end
++
++    assert Repo.all(Address) == [local]
++  end
++
++  defp address_fixture(id, type \\ "node") do
++    {:ok, address} =
++      Locations.create_address(%{
++        osm_id: id,
++        osm_type: type,
++        latitude: "39.9",
++        longitude: "116.4",
++        name: "Old place",
++        road: "Old road",
++        house_number: "1",
++        postcode: "Old postcode",
++        display_name: "Old address",
++        raw: %{}
++      })
++
++    address
++  end
++
++  defp unknown_fixture do
++    {:ok, unknown} =
++      Locations.create_address(%{
++        osm_id: 0,
++        osm_type: "unknown",
++        latitude: 0,
++        longitude: 0,
++        display_name: "Unknown",
++        raw: %{"error" => "Unable to geocode"}
++      })
++
++    unknown
++  end
++
++  defp refreshed_raw(address) do
++    %{
++      "osm_id" => address.osm_id,
++      "osm_type" => address.osm_type,
++      "lat" => "40.1",
++      "lon" => "116.6",
++      "display_name" => "Refreshed address",
++      "namedetails" => %{"name" => "Refreshed place"},
++      "address" => %{
++        "road" => "Refreshed road",
++        "house_number" => "2",
++        "postcode" => "Refreshed postcode",
++        "city" => "Refreshed city",
++        "country" => "Refreshed country",
++        "county" => "Refreshed county",
++        "neighbourhood" => "Refreshed neighbourhood",
++        "state" => "Refreshed state",
++        "state_district" => "Refreshed district"
++      }
++    }
++  end
++
++  defp assert_refreshed(original, raw) do
++    stored = Repo.get!(Address, original.id)
++
++    assert {stored.id, stored.osm_id, stored.osm_type, stored.latitude, stored.longitude} ==
++             {original.id, original.osm_id, original.osm_type, original.latitude,
++              original.longitude}
++
++    assert stored.name == raw["namedetails"]["name"]
++    assert stored.display_name == raw["display_name"]
++    assert stored.raw == raw
++
++    for field <- [
++          :road,
++          :house_number,
++          :postcode,
++          :city,
++          :country,
++          :county,
++          :neighbourhood,
++          :state,
++          :state_district
++        ] do
++      assert Map.fetch!(stored, field) == raw["address"][Atom.to_string(field)]
++    end
++  end
++end
+diff --git a/elixir/test/teslamate/settings_test.exs b/elixir/test/teslamate/settings_test.exs
+index 607ad3b..a718408 100644
+--- a/elixir/test/teslamate/settings_test.exs
++++ b/elixir/test/teslamate/settings_test.exs
+@@ -253,14 +253,14 @@ defmodule TeslaMate.SettingsTest do
+ 
+       assert [
+                %Address{
+-                 name: "0",
++                 name: "0_nl",
+                  state: "Berlin_nl",
+                  country: "nl",
+                  latitude: decimal("0.000000"),
+                  longitude: decimal("0.000000")
+                },
+                %Address{
+-                 name: "1",
++                 name: "1_nl",
+                  state: "Berlin_nl",
+                  country: "nl",
+                  latitude: decimal("0.000000"),

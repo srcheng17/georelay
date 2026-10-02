@@ -1,6 +1,6 @@
 # 仅供开发/后续审查的 sidecar 示例；不是生产 stack 的替换文件。
 services:
-  amap-adapter:
+  georelay-adapter:
     build:
       context: ./adapter
     environment:
@@ -28,7 +28,8 @@ services:
       - no-new-privileges:true
     restart: unless-stopped
     # 不映射 host ports；补丁版 TeslaMate 需接入此网络并设置：
-    # NOMINATIM_BASE_URL=http://amap-adapter:8080
+    # NOMINATIM_BASE_URL=http://georelay-adapter:8080
+    # NOMINATIM_LOCAL_IDENTITIES_ONLY=true
 
 volumes:
   amap-data:

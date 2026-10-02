@@ -12,7 +12,7 @@ Matrix build depends on checks and the decision. Preserve upstream tests, native
 
 ## Retention
 
-Inventory both packages through paginated GitHub Packages APIs; validate repository/owner and support User/Organization owners. Managed tags follow vMAJOR.MINOR.PATCH-amap-40hex and -amd64/-arm64. A complete release exists in both packages with exact linux/amd64 and linux/arm64 indexes matching its architecture tags and available version records.
+Inventory both packages through paginated GitHub Packages APIs; validate repository/owner and support User/Organization owners. Managed tags follow vMAJOR.MINOR.PATCH-georelay-40hex and -amd64/-arm64. A complete release exists in both packages with exact linux/amd64 and linux/arm64 indexes matching its architecture tags and available version records.
 
 Protect the ten most recently created complete groups, both latest indexes and children, and the complete latest group when identifiable. Protect other retained tags and their referenced children, including shared digests. Unknown/incomplete/unassociated versions stay. Malformed manifests or missing referenced records abort planning before any DELETE.
 

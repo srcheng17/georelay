@@ -15,10 +15,11 @@ from urllib.parse import parse_qs
 
 sys.path.insert(0, str(Path(__file__).resolve().parents[1] / "scripts"))
 import retain_images as retention
+import test_publish
 
 
-REPOSITORY = "fixture/teslamate"
-PACKAGES = ("teslamate-amap", "teslamate-amap-adapter")
+REPOSITORY = "fixture/georelay"
+PACKAGES = ("georelay", "georelay-adapter")
 INDEX = "application/vnd.oci.image.index.v1+json"
 IMAGE = "application/vnd.oci.image.manifest.v1+json"
 
@@ -32,7 +33,7 @@ def raw_manifest(data):
 
 
 def group(number):
-    return "v4.3." + str(number) + "-amap-" + format(number + 1, "040x")
+    return "v4.3." + str(number) + "-georelay-" + format(number + 1, "040x")
 
 
 class PackageFixture:
@@ -130,6 +131,42 @@ class PackageFixture:
 
 
 class RetentionTests(unittest.TestCase):
+    def test_selected_packages_and_tags_match_the_actual_publisher(self):
+        publisher = test_publish.PublicationTests("test_checked_architectures_are_pushed_before_next_load")
+        self.addCleanup(publisher.doCleanups)
+        publisher.setUp()
+        result, commands = publisher.publish(GITHUB_REPOSITORY=REPOSITORY)
+        self.assertEqual(result.returncode, 0, result.stderr)
+        pushed = [command[-1].removeprefix("ghcr.io/").rsplit(":", 1) for command in commands if command[0] == "push"]
+        report = PackageFixture().run()
+        self.assertEqual({package for package, _ in pushed}, {"fixture/" + package for package in report["packages"]})
+        self.assertEqual(set(report["packages"]), {"georelay", "georelay-adapter"})
+        versions = [command[command.index("--tag") + 1].rsplit(":", 1)[1] for command in commands if command[:3] == ["buildx", "imagetools", "create"] and not command[command.index("--tag") + 1].endswith(":latest")]
+        for tag in versions:
+            match = retention.RELEASE.fullmatch(tag)
+            self.assertIsNotNone(match)
+            self.assertIsNone(match[2])
+        for _, tag in pushed:
+            match = retention.RELEASE.fullmatch(tag)
+            self.assertIsNotNone(match)
+            self.assertIn(match[1], versions)
+            self.assertIn(match[2], ("amd64", "arm64"))
+
+    def test_legacy_release_tags_are_preserved_and_legacy_packages_are_untouched(self):
+        fixture = PackageFixture(13)
+        for package in PACKAGES:
+            for suffix in ("", "-amd64", "-arm64"):
+                row = fixture.tagged(package, group(0) + suffix)
+                tags = row["metadata"]["container"]["tags"]
+                tags[:] = [tag.replace("-georelay-", "-amap-") for tag in tags]
+        report = fixture.run(apply=True)
+        for package in PACKAGES:
+            removed = {row["digest"] for row in report["packages"][package]["delete"]}
+            for row in fixture.rows[package][:3]:
+                self.assertNotIn(row["name"], removed)
+                self.assertTrue(all(retention.RELEASE.fullmatch(tag) is None for tag in row["metadata"]["container"]["tags"]))
+        self.assertFalse(any("teslamate-amap" in event[1] for event in fixture.events))
+
     def test_default_preview_paginates_and_keeps_ten_by_creation_date(self):
         fixture = PackageFixture(40)
         for package in PACKAGES:

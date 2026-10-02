@@ -28,6 +28,8 @@ class ChangesTests(unittest.TestCase):
         self.write("README.md")
         self.write("docs/guide.md")
         self.write("adapter/server.py")
+        self.write("MODIFICATIONS.md")
+        self.write("TRADEMARK.md")
         self.base = self.commit()
 
     def git(self, *args):
@@ -66,6 +68,15 @@ class ChangesTests(unittest.TestCase):
         self.git("reset", "--hard", self.base)
         self.git("rm", "adapter/server.py")
         self.assertTrue(self.required(self.commit()))
+
+    def test_legal_and_modification_inputs_require_full_image_validation(self):
+        for path in ("MODIFICATIONS.md", "TRADEMARK.md", "LICENSE", "NOTICE"):
+            with self.subTest(path=path):
+                self.git("reset", "--hard", self.base)
+                (self.root / path).write_text("reviewed text changed\n", encoding="utf-8")
+                head = self.commit()
+                self.assertTrue(self.required(head))
+                self.assertTrue(self.required(head, "pull_request"))
 
     def test_rename_cannot_hide_runtime_and_doc_deletion_is_lightweight(self):
         self.git("mv", "adapter/server.py", "docs/server.txt")

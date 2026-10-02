@@ -11,6 +11,7 @@ UPSTREAM_TIMEOUT_SECONDS to 8, and LOOKUP_TIMEOUT_SECONDS to 20. No retries.
 """
 
 import argparse
+import concurrent.futures
 import contextlib
 from decimal import Decimal, InvalidOperation
 import fcntl
@@ -399,11 +400,18 @@ class Adapter:
             raise AdapterError(400, "Too many identities")
         identities = []
         for value in ids:
-            if re.fullmatch(r"[NWR][0-9]+", value) or re.fullmatch(r"[WR]-[0-9]+", value):
-                raise AdapterError(422, "Unsupported identity")
-            if not re.fullmatch(r"N-[1-9][0-9]{0,18}", value) or int(value[2:]) > MAX_ID:
+            if not re.fullmatch(r"[NWR]-?[1-9][0-9]{0,18}", value):
                 raise AdapterError(400, "Invalid identity")
-            identities.append(int(value[2:]))
+            identity = int(value[1:])
+            if abs(identity) > MAX_ID:
+                raise AdapterError(400, "Invalid identity")
+            if identity > 0:
+                continue  # Historical positive IDs have no trusted provenance.
+            if value[0] != "N":
+                raise AdapterError(422, "Unsupported identity")
+            identities.append(-identity)
+        if not identities:
+            return []
         rows = []
         with self.connect(deadline) as db:
             for identity in dict.fromkeys(identities):
@@ -412,7 +420,23 @@ class Adapter:
                     raise AdapterError(404, "Identity not found")
                 rows.append((identity, *row))
         self.refresh_osm_batch(rows, language, deadline, policy)
-        return [self.address(*row[:3], language, deadline, policy) for row in rows]
+        pool = concurrent.futures.ThreadPoolExecutor(max_workers=4)
+        try:
+            futures = [pool.submit(self.address, *row[:3], language, deadline, policy) for row in rows]
+            done, pending = concurrent.futures.wait(
+                futures, timeout=remaining(deadline), return_when=concurrent.futures.FIRST_EXCEPTION,
+            )
+            for future in done:
+                future.result()  # Propagate any failure before waiting for ordered results.
+            if pending:
+                raise concurrent.futures.TimeoutError
+            remaining(deadline)
+            return [future.result() for future in futures]
+        except concurrent.futures.TimeoutError:
+            raise AdapterError(504, "Lookup request timed out") from None
+        finally:
+            # Running requests already share the deadline; cancel queued work.
+            pool.shutdown(wait=False, cancel_futures=True)
 
     def refresh_osm_batch(self, rows, language, deadline, policy):
         if policy != "osm" and not policy.startswith("auto:"):

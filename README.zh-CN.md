@@ -1,8 +1,8 @@
-# TeslaMate 地址适配
+# GeoRelay
 
 [English](README.md) | 简体中文
 
-为自托管的 [TeslaMate](https://github.com/teslamate-org/teslamate) 增加高德、百度和 OpenStreetMap 地址解析，用于行程和充电记录的地点名称与地址。本仓库维护源码补丁、独立适配器和构建流程。
+自托管的行程与充电记录，支持高德、百度和 OpenStreetMap 地址解析。GeoRelay 从上游稳定版本构建修改版应用，通过独立适配器查询地点名称和地址。
 
 > This project is an unofficial community tool and is not affiliated with, endorsed by, or supported by the official TeslaMate project.
 
@@ -10,9 +10,11 @@
 
 ## 开始使用
 
-往现有 TeslaMate stack 添加 `amap-adapter`，并将 TeslaMate 换成本项目的补丁镜像。两个镜像都支持 `linux/amd64` 和 `linux/arm64`。官方镜像不支持 `NOMINATIM_BASE_URL`。
+往现有 TeslaMate stack 添加 `georelay-adapter`，并将 TeslaMate 换成本项目的补丁镜像。两个镜像都支持 `linux/amd64` 和 `linux/arm64`。官方镜像不支持 `NOMINATIM_BASE_URL`。
 
-下面的片段默认使用已发布的 `latest` 镜像。需要固定版本时，从 [TeslaMate 镜像](https://github.com/users/srcheng17/packages/container/package/teslamate-amap)和[适配器镜像](https://github.com/users/srcheng17/packages/container/package/teslamate-amap-adapter)页面选择相同版本，设置为 `TESLAMATE_AMAP_VERSION`。
+本次改动合并且首次 publish 成功后，GeoRelay 新镜像名称才可用。在此之前，请使用下方源码构建方式；早期镜像包保留原名称。
+
+发布后，下面的片段默认使用 `latest` 镜像。需要固定版本时，从[应用镜像](https://github.com/users/srcheng17/packages/container/package/georelay)和[适配器镜像](https://github.com/users/srcheng17/packages/container/package/georelay-adapter)页面选择相同版本，设置为 `GEORELAY_VERSION`。
 
 在现有 stack 的 `.env` 中设置 `AMAP_KEY` 和 `NOMINATIM_USER_AGENT`，格式参考 [.env.example](.env.example)。默认大陆使用高德 Web 服务，境外使用 OSM；User-Agent 需包含应用名和实际联系方式。大陆改用百度时，设置 `MAINLAND_PROVIDER=baidu`、`BAIDU_AK` 及其对应的 `BAIDU_SK`。
 
@@ -21,12 +23,13 @@
 ```yaml
 services:
   teslamate:
-    image: ghcr.io/srcheng17/teslamate-amap:${TESLAMATE_AMAP_VERSION:-latest}
+    image: ghcr.io/srcheng17/georelay:${GEORELAY_VERSION:-latest}
     environment:
-      NOMINATIM_BASE_URL: http://amap-adapter:8080
+      NOMINATIM_BASE_URL: http://georelay-adapter:8080
+      NOMINATIM_LOCAL_IDENTITIES_ONLY: "true"
       # Keep your other TeslaMate settings here.
-  amap-adapter:
-    image: ghcr.io/srcheng17/teslamate-amap-adapter:${TESLAMATE_AMAP_VERSION:-latest}
+  georelay-adapter:
+    image: ghcr.io/srcheng17/georelay-adapter:${GEORELAY_VERSION:-latest}
     restart: unless-stopped
     environment:
       GEOCODER_PROVIDER: "${GEOCODER_PROVIDER:-auto}"
@@ -51,27 +54,46 @@ volumes:
 
 Compose 默认网络可以让两个服务互通。如果 TeslaMate 使用自定义网络，把适配器加入同一网络，并保留访问地址服务的外网出口。适配器无需映射主机端口。
 
-重启和升级时保留 `amap-data`，其中存有永久地址身份和响应缓存。替换现有环境前，请阅读[备份与旧地址兼容说明](docs/AMAP.md#永久身份与备份)。其他选项见[配置指南](docs/AMAP.md#配置)。
+重启和升级时保留 `amap-data`，其中存有永久地址身份和响应缓存。替换现有环境前，请阅读[已有地址与备份](#已有地址与备份)。其他选项见[配置指南](docs/AMAP.md#配置)。
+
+已使用早期 `teslamate-amap` 镜像时，将两个镜像引用改为 `georelay` 和 `georelay-adapter`，并添加上面的本地身份设置。保留原 Compose project、数据卷和 sidecar 服务名；原服务名为 `amap-adapter` 时，仍使用 `http://amap-adapter:8080`，下文命令中的服务名也改用 `amap-adapter`。旧镜像包继续保留，新发布使用 GeoRelay 名称；示例版本变量从 `TESLAMATE_AMAP_VERSION` 改为 `GEORELAY_VERSION`。
 
 发布新的 `latest` 不会更新运行中的容器。需要升级时，先备份 TeslaMate 数据库和适配器数据，再在 stack 目录执行：
 
 ```sh
-docker compose pull teslamate amap-adapter
-docker compose up -d teslamate amap-adapter
+docker compose pull teslamate georelay-adapter
+docker compose up -d teslamate georelay-adapter
 ```
 
 <details>
 <summary>从源码构建镜像</summary>
 
-需要本地构建时，在仓库根目录执行以下命令，并将上面的两个镜像地址改为 `teslamate-amap:local` 和 `amap-adapter:local`。目标目录 `/tmp/teslamate-amap-build` 必须不存在或为空。
+需要本地构建时，在仓库根目录执行以下命令，并将上面的两个镜像地址改为 `georelay:local` 和 `georelay-adapter:local`。目标目录 `/tmp/georelay-build` 必须不存在或为空。
 
 ```sh
-python3 scripts/prepare_upstream.py /tmp/teslamate-amap-build
-docker build -t teslamate-amap:local /tmp/teslamate-amap-build
-docker build -t amap-adapter:local adapter
+python3 scripts/prepare_upstream.py /tmp/georelay-build
+docker build -t georelay:local /tmp/georelay-build
+docker build -t georelay-adapter:local adapter
 ```
 
 </details>
+
+### 已有地址与备份
+
+新地址使用永久本地负数 ID。补丁版应用设置 `NOMINATIM_LOCAL_IDENTITIES_ONLY=true` 后，已有正数 ID 保持不变，语言刷新时跳过，不会阻断同批新地址。适配器不会将这些 ID 转发给 OSM：部分私人版本使用的正数 hash 看起来与 OSM ID 相同。导入或修复旧地址属于独立迁移工作。
+
+缓存到期只刷新适配器响应，不会更新已有 PostgreSQL 地址。在应用中切换地址语言会显式刷新本地地址，包括地点名、道路、门牌和原始响应；身份和坐标保持不变。高德和百度目前仍使用服务默认语言，选择英语也可能返回中文。
+
+适配器身份库应与应用数据库一起备份。在实际 stack 目录执行，并使用运行该 stack 时相同的 Compose 文件和 project 参数：
+
+```sh
+snapshot="adapter-snapshot-$(date -u +%Y%m%dT%H%M%SZ).sqlite3"
+docker compose exec -T georelay-adapter python -m adapter.server --backup "/data/$snapshot"
+docker compose cp "georelay-adapter:/data/$snapshot" "./$snapshot"
+chmod 600 "./$snapshot"
+```
+
+备份含位置数据，请安全保存到 Docker 主机以外；验证副本后，清理 `/data` 中的临时快照。命令使用 SQLite 在线备份 API，不要复制活动数据库文件。恢复时先停止适配器，恢复与应用数据一致的完整身份库，再启动服务。
 
 ## 功能
 
@@ -130,24 +152,13 @@ TeslaMate 使用 [Elixir](https://elixir-lang.org/) 编写，将车辆数据保�
 
 ## 截图
 
-以下是官方 TeslaMate 界面和仪表盘的截图，更多示例见[官方截图文档](https://docs.teslamate.org/docs/screenshots/)。
-
-![官方 TeslaMate Web 界面](https://raw.githubusercontent.com/teslamate-org/teslamate/33d200b2fba9d5138803916a788cef5eae31b1aa/website/static/screenshots/web_interface.png)
-
-<details>
-<summary>行程详情与电池健康</summary>
-
-![官方 TeslaMate 行程详情仪表盘](https://raw.githubusercontent.com/teslamate-org/teslamate/33d200b2fba9d5138803916a788cef5eae31b1aa/website/static/screenshots/drive.png)
-
-![官方 TeslaMate 电池健康仪表盘](https://raw.githubusercontent.com/teslamate-org/teslamate/33d200b2fba9d5138803916a788cef5eae31b1aa/website/static/screenshots/battery-health.png)
-
-</details>
+GeoRelay 使用独立名称并移除上游 Logo。界面和仪表盘功能来自上游应用；[上游截图文档](https://docs.teslamate.org/docs/screenshots/)展示了这些功能，截图使用上游品牌。
 
 ## 版本维护
 
-项目每六小时检查官方稳定 release。发现新版本后，自动在更新 PR 中固定 tag 和 commit，应用补丁，在两个 CPU 架构上运行测试与构建。全部通过后发布新的 GHCR 版本镜像，两个版本索引验证通过后再更新 `latest`；补丁冲突或检查失败会停止发布。
+项目每六小时检查官方稳定 release。发现新版本后，自动在更新 PR 中固定 tag 和 commit，核对上游法律文件，应用补丁，在两个 CPU 架构上运行测试与构建。全部通过后发布新的 GHCR 版本镜像，两个版本索引验证通过后再更新 `latest`。LICENSE、NOTICE 或 TRADEMARK.md 变化时需要人工复核；补丁冲突或检查失败会停止发布。
 
-本仓库 `main` 上影响镜像的改动也会构建并发布已检查镜像。文档、agent 指令、Trellis 元数据和 Paseo 设置仅运行轻量检查；其他改动运行完整双架构验证。手动验证始终执行完整构建。版本标签包含上游版本和源码 commit，`latest` 跟随验证通过的版本。工作流不自动合并 PR，也不更新正在运行的服务。
+本仓库 `main` 上影响镜像的改动也会构建并发布已检查镜像。README、使用指南、agent 指令、Trellis 元数据和 Paseo 设置仅运行轻量检查；其他改动，包括镜像法律文件和修改说明，运行完整双架构验证。手动验证始终执行完整构建。版本标签包含上游版本和源码 commit，`latest` 跟随验证通过的版本。工作流不自动合并 PR，也不更新正在运行的服务。
 
 每周清理保留 `latest` 和最近 10 组完整版本，以及它们引用的架构镜像。不完整或无法识别的记录保留待复核。需要长期拉取的旧版本请自行镜像保存。版本选择、清理预览与维护见[版本跟进与发布](docs/AMAP.md#版本跟进与发布)。
 
@@ -169,4 +180,4 @@ TeslaMate 是独立项目，与 Tesla, Inc. 无隶属、认可或赞助关系；
 
 - TeslaMate 初始作者：[Adrian Kumpf](https://github.com/adriankumpf)。
 - [TeslaMate 官方贡献者](https://github.com/teslamate-org/teslamate/graphs/contributors)。
-- [本仓库修改与维护贡献者](https://github.com/srcheng17/teslamate/graphs/contributors)。
+- [本仓库修改与维护贡献者](https://github.com/srcheng17/georelay/graphs/contributors)。
