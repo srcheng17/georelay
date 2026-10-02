@@ -60,6 +60,7 @@ elif args[0] == "run":
         # Execute the actual embedded probe: fixed offline response, no Docker/network.
         setup = ''' + repr('''
 import io, os
+from pathlib import Path
 from email.message import Message
 from urllib.error import HTTPError, URLError
 import urllib.request
@@ -73,10 +74,10 @@ def fake_open(request, timeout):
     if os.environ["FAKE_MODE"] == "http-error":
         raise HTTPError(url, 500, "fake-private-error", None, None)
     body = {
-        "http://app:4000/sign_in": os.environ["FAKE_BODY"],
-        "http://stub:8080/health": '{"ok": true}',
+        "http://app:4000/sign_in": Path(os.environ["FAKE_BODY_FILE"]).read_bytes(),
+        "http://stub:8080/health": b'{"ok": true}',
     }[url]
-    response = io.BytesIO(body.encode())
+    response = io.BytesIO(body)
     response.status = 503 if os.environ["FAKE_MODE"] == "http-status" else 200
     response.headers = Message()
     response.headers["Content-Type"] = os.environ.get("FAKE_CONTENT_TYPE", "text/html; charset=utf-8" if url.endswith("sign_in") else "application/json")
@@ -114,14 +115,17 @@ class MainImageSmokeTests(unittest.TestCase):
         docker.write_text(FAKE_DOCKER)
         docker.chmod(0o755)
         self.state = self.directory / "state.json"
+        self.body = self.directory / "body.html"
+        self.body.write_text(LOGIN_HTML, encoding="utf-8")
 
     def smoke(self, mode="success", **overrides):
         self.state.unlink(missing_ok=True)
+        self.body.write_text(overrides.pop("FAKE_BODY", LOGIN_HTML), encoding="utf-8")
         started = time.monotonic()
         result = subprocess.run(
             ["bash", str(ROOT / "scripts/test_main_image.sh"), "app:checked", "probe:checked"],
             env={**os.environ, "PATH": str(self.directory) + os.pathsep + os.environ["PATH"],
-                 "TMPDIR": str(self.directory), "FAKE_STATE": str(self.state), "FAKE_MODE": mode, "FAKE_BODY": LOGIN_HTML,
+                 "TMPDIR": str(self.directory), "FAKE_STATE": str(self.state), "FAKE_MODE": mode, "FAKE_BODY_FILE": str(self.body),
                  "MAIN_IMAGE_TIMEOUT_SECONDS": "3", **overrides},
             capture_output=True, text=True, timeout=10,
         )
@@ -231,7 +235,7 @@ class MainImageSmokeTests(unittest.TestCase):
                 process = subprocess.Popen(
                     ["bash", str(ROOT / "scripts/test_main_image.sh"), "app:checked", "probe:checked"],
                     env={**os.environ, "PATH": str(self.directory) + os.pathsep + os.environ["PATH"],
-                         "TMPDIR": str(self.directory), "FAKE_STATE": str(self.state), "FAKE_MODE": mode, "FAKE_BODY": LOGIN_HTML,
+                         "TMPDIR": str(self.directory), "FAKE_STATE": str(self.state), "FAKE_MODE": mode, "FAKE_BODY_FILE": str(self.body),
                          "FAKE_READY": str(ready), "MAIN_IMAGE_TIMEOUT_SECONDS": "120"},
                     stdout=subprocess.PIPE, stderr=subprocess.PIPE, text=True, start_new_session=True,
                 )

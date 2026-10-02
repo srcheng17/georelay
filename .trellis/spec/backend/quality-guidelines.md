@@ -115,7 +115,7 @@ Base：无账号/地图 Key 的新库启动并返回登录页面。Good：损坏
 
 ### 6. Tests Required
 
-`tests/test_main_image.py` 覆盖默认入口/隔离参数、真实 probe 断言、退出/SQL/HTTP/超时/清理失败与阻塞 Docker 时取消；验证 workflow 两架构门禁早于 artifact 保存。实际构建镜像运行及故障检查单独记录，云端结果未取得时明确待验证。
+`tests/test_main_image.py` 覆盖默认入口/隔离参数、真实 probe 断言、退出/SQL/HTTP/超时/清理失败与阻塞 Docker 时取消；验证 workflow 两架构门禁早于 artifact 保存。实际构建镜像运行及故障检查单独记录，云端结果未取得时明确待验证。大型HTTP body fixture通过临时文件传递，环境只传路径；Linux单个环境字符串约128KiB上限不能冒充应用响应失败，ASCII/Unicode超限回归均保留。
 
 ### 7. Wrong vs Correct
 

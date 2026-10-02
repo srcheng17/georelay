@@ -17,7 +17,31 @@
       ]
     }
   },
-  "pr": null,
+  "pr": "https://github.com/srcheng17/georelay/pull/10",
   "beta_run": null,
-  "main_run": null
+  "main_run": null,
+  "beta_runs": [
+    {
+      "id": 37068534907,
+      "head": "3a52ad71d39e59525e760867ca7075a985c6e7a5",
+      "conclusion": "failure",
+      "checks": "success",
+      "build-amd64": "failure at Python checks",
+      "build-arm64": "failure at Python checks",
+      "verify": "failure",
+      "publish": "skipped",
+      "main_runtime": "not executed",
+      "cause": "Linux E2BIG for large FAKE_BODY environment values in offline HTTP fixture; root reproduced both oversized cases in isolated Linux container"
+    }
+  ],
+  "linux_fixture_fix": {
+    "files": [
+      "tests/test_main_image.py"
+    ],
+    "root_cause": "oversized response fixture passed through Linux environment string limit",
+    "transport": "temporary UTF-8 file; environment contains path only",
+    "mac_targeted": "12/12 in 24.301s",
+    "linux_arm64_targeted": "12/12 in 52.495s; offline fixture, not real app startup",
+    "oversized_ascii_and_unicode_regressions": "preserved and passed"
+  }
 }
