@@ -216,20 +216,17 @@ def control(repository, run_id, attempt, api=github, fetch=registry_document, ap
             if pull is None or pull.get("mergeable") is not True or pull.get("mergeable_state") not in {"clean", "has_hooks"}:
                 return dict(report, reason="candidate_changed_before_merge")
         stage = "branch_protection"
-        owner, name = repository.split("/")
-        # Read the rule via GraphQL; the REST protection endpoint requires an
-        # administration scope that GITHUB_TOKEN cannot request in workflow YAML.
-        rule = api("POST", "graphql", {"query": (
-            "query($owner:String!,$name:String!){repository(owner:$owner,name:$name){"
-            'ref(qualifiedName:"refs/heads/main"){branchProtectionRule{'
-            "requiresStatusChecks requiresStrictStatusChecks isAdminEnforced requiredStatusChecks{context app{databaseId}}}}}}"
-        ), "variables": {"owner": owner, "name": name}})["data"]["repository"]["ref"]["branchProtectionRule"]
-        checks = rule["requiredStatusChecks"]
-        if (rule.get("requiresStatusChecks") is not True or rule.get("requiresStrictStatusChecks") is not True
-                or rule.get("isAdminEnforced") is not True
-                or not isinstance(checks, list)
-                or [item.get("app", {}).get("databaseId") for item in checks if item.get("context") == "verify"] != [15368]):
-            raise ValueError("Strict verify protection is not established")
+        # GITHUB_TOKEN can read this summary, but cannot inspect strict settings.
+        # The ordinary merge endpoint enforces the repository's existing strict
+        # policy atomically; this controller never requests an admin bypass.
+        branch_summary = api("GET", root + "/branches/main")
+        protection = branch_summary["protection"]
+        required = protection["required_status_checks"]
+        checks = required["checks"]
+        if (branch_summary.get("name") != "main" or branch_summary.get("protected") is not True or protection.get("enabled") is not True
+                or required.get("enforcement_level") != "everyone" or not isinstance(checks, list)
+                or [item.get("app_id") for item in checks if item.get("context") == "verify"] != [15368]):
+            raise ValueError("Required verify protection is not established")
         if not apply:
             return dict(report, status="dry_run", reason="candidate_ready", version=version)
         # Strict server protection is the atomic base-freshness gate; no bypass.

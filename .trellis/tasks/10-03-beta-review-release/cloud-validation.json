@@ -18,8 +18,8 @@
     }
   },
   "pr": "https://github.com/srcheng17/georelay/pull/10",
-  "beta_run": 37070822103,
-  "main_run": null,
+  "beta_run": 37071951401,
+  "main_run": 37072746968,
   "beta_runs": [
     {
       "id": 37068534907,
@@ -66,6 +66,57 @@
       "verify": "failure",
       "publish": "skipped",
       "cause": "test fixture assumed interpreter startup and adapter import complete within 300ms; deadline correctly returned 504 and wall-clock bound passed"
+    },
+    {
+      "id": 37071951401,
+      "head": "4dce3a817fd0608fe7e9e3b271e4cd4562dd0ed6",
+      "conclusion": "success",
+      "build-amd64": {
+        "startup": "success",
+        "migrations": 105,
+        "adapter_tests": 34
+      },
+      "build-arm64": {
+        "startup": "success",
+        "migrations": 105,
+        "adapter_tests": 34
+      },
+      "verify": "success",
+      "publish": "success"
+    },
+    {
+      "id": 37073109247,
+      "head": "9fa79ae813f68c3a9ae4804f5b455ed03a08e032",
+      "conclusion": "failure",
+      "build-arm64": {
+        "startup": "success",
+        "migrations": 105,
+        "adapter_tests": 34
+      },
+      "build-amd64": {
+        "startup": "skipped",
+        "adapter_tests": "33/34; fifty cold mainland lookup timed out at 1s success fixture budget on baidu subtest"
+      },
+      "verify": "failure",
+      "publish": "skipped",
+      "cause": "positive concurrency fixture imposes 1s runner throughput assumption including SQLite writes; production default lookup budget is 20s"
+    },
+    {
+      "id": 37074314019,
+      "head": "c12b7e60c7d82934173695064d054de6fb4cf635",
+      "conclusion": "success",
+      "build-amd64": {
+        "startup": "success",
+        "migrations": 105,
+        "adapter_tests": 34
+      },
+      "build-arm64": {
+        "startup": "success",
+        "migrations": 105,
+        "adapter_tests": 34
+      },
+      "verify": "success",
+      "publish": "success"
     }
   ],
   "linux_fixture_fix": {
@@ -79,9 +130,13 @@
     "oversized_ascii_and_unicode_regressions": "preserved and passed"
   },
   "beta_registry": {
-    "both_indexes": "exact amd64/arm64 with valid OCI revision/version/digests",
-    "beta-pr-10": "matches checked version",
-    "latest": "unchanged from before beta"
+    "both_indexes": "exact amd64/arm64 with verified child/config digests and OCI source/revision/version",
+    "version": "v4.3.0-georelay-beta-4dce3a817fd0608fe7e9e3b271e4cd4562dd0ed6",
+    "georelay": "sha256:0d924df9d14c3f852fc92e028f15d6814a8f6f305983491b02edc8cd64c594ec",
+    "georelay-adapter": "sha256:71594e209dbbcfd15739f22b3ab9cba225be84ee4521579268b829af61fe97cc",
+    "beta-pr-10": "exact version digests",
+    "latest": "unchanged from before beta",
+    "control_dry_run": "candidate_ready; no mutations"
   },
   "bark_secret": {
     "name": "BARK_URL",
@@ -102,5 +157,124 @@
     "linux_arm64_before": "controlled 0.4s startup delay reproduces empty HTTP requests; original 504/wall bound pass and child exited",
     "linux_arm64_after": "same delay: real HTTP, 504, wall bound and child SIGKILL verified; elapsed 2.138s",
     "linux_arm64_packaged_suite": "34/34 in 13.522s; no external network; imported /app/adapter/server.py; container removed"
+  },
+  "bootstrap_merge": {
+    "pr": 10,
+    "head": "4dce3a817fd0608fe7e9e3b271e4cd4562dd0ed6",
+    "merge_sha": "5727c65a9eda47869bfea1b79679e6899ce829a5",
+    "method": "normal merge with expected head; explicit user authorization; no admin bypass"
+  },
+  "bark_failure_test": {
+    "branch": "qa/georelay-bark-failure-37071951401",
+    "sha": "3a52ad71d39e59525e760867ca7075a985c6e7a5",
+    "run": 37072800085,
+    "status": "passed",
+    "source_conclusion": "failure",
+    "artifact_count": 0,
+    "publish": "skipped",
+    "controller_run": 37073005011,
+    "controller_reason": "beta_validation",
+    "notify": true,
+    "dry_run": "passed",
+    "sender_status": "sent",
+    "sender_attempts": 1,
+    "http_status": 200,
+    "response_code": "200 verified by sender",
+    "phone_receipt": "not independently verified",
+    "temporary_branch": "deleted; absence verified"
+  },
+  "main_runs": [
+    {
+      "id": 37072746968,
+      "head": "5727c65a9eda47869bfea1b79679e6899ce829a5",
+      "event": "push",
+      "conclusion": "success",
+      "build-amd64": {
+        "startup": "success",
+        "migrations": 105,
+        "adapter_tests": 34
+      },
+      "build-arm64": {
+        "startup": "success",
+        "migrations": 105,
+        "adapter_tests": 34
+      },
+      "verify": "success",
+      "publish": "success",
+      "registry": {
+        "version": "v4.3.0-georelay-5727c65a9eda47869bfea1b79679e6899ce829a5",
+        "georelay": "sha256:de0a17ac232888af181fc73c3133f5b9db4f60c53d8ecedc56830cdf73dc40e0",
+        "georelay-adapter": "sha256:6e11bc8dc612234033093a65fa6a029559bcc8e6d770066e1221ba9fd30e6405",
+        "latest": "both exact version indexes; amd64/arm64 and OCI/digests passed"
+      }
+    }
+  ],
+  "batch_fixture_fix": {
+    "files": [
+      "tests/test_adapter.py"
+    ],
+    "root_cause": "1s positive batch fixture conflates SQLite/scheduler throughput with functional concurrency; production default remains 20s",
+    "fix": "5s bounded positive-fixture budget; remove serial-sleep microbenchmark; keep full fifty results/order/identity/coordinates/providers and 1<peak<=4; independent global-deadline failure and queue-cancel tests preserved",
+    "linux_arm64_before": "controlled 30ms lookup connection delay reproduces original 1s 504 in both providers, 2.021s total",
+    "linux_arm64_after": "same delay, all positive assertions passed, 3.125s total",
+    "serialized_mutation": "single worker returns fifty results within bounded budget but both providers correctly fail peak>1; 4.689s total",
+    "linux_arm64_packaged_suite": "34/34 in 13.603s; /app module verified; network none; container removed",
+    "review_focused": "batch/global-deadline/queue-cancel/slow-drip 5/5"
+  },
+  "conditional_candidates": [
+    {
+      "pr": 11,
+      "head": "9fa79ae813f68c3a9ae4804f5b455ed03a08e032",
+      "beta_run": 37073109247,
+      "status": "failed; no merge/dispatch",
+      "controller_run": 37073595194,
+      "notify": true,
+      "bark": {
+        "status": "sent",
+        "attempts": 1,
+        "http_status": 200
+      }
+    },
+    {
+      "pr": 11,
+      "head": "c12b7e60c7d82934173695064d054de6fb4cf635",
+      "beta_run": 37074314019,
+      "status": "beta success; default-token branch-protection metadata read failed closed; no merge/dispatch",
+      "beta_registry": {
+        "georelay": "sha256:35f57d456da5076d3230dd52a7961eb1a8307152031e849da9cb288d86a7102e",
+        "georelay-adapter": "sha256:6bebfb847ddaee21c4aecac3e65b6f096a05aa0b0eaec4f5c941b2ecfd3ca9d9",
+        "alias": "exact beta-pr-11",
+        "latest": "unchanged main5727 indexes; child/config/OCI/two arches passed"
+      },
+      "controller_run": 37074994812,
+      "controller_reason": "branch_protection",
+      "bark": {
+        "status": "sent",
+        "attempts": 1,
+        "http_status": 200
+      }
+    }
+  ],
+  "protection_capability_probe": {
+    "run": 37076000025,
+    "branch": "qa/georelay-protection-probe-37074994812",
+    "sha": "211de68bcd05ad41c3919aab8a123f61b5e4caf9",
+    "permissions": "same as default-token controller",
+    "operations": "only GET and GraphQL query; intentionally check-only, no images/artifacts/publication",
+    "branch_summary": {
+      "protected": true,
+      "enabled": true,
+      "enforcement_level": "everyone",
+      "verify_app": 15368
+    },
+    "required_status_checks_detail": "HTTP403",
+    "graphql_full_and_four_fields": "FORBIDDEN at repository.ref.branchProtectionRule",
+    "active_branch_rules": [],
+    "control_run": 37076023220,
+    "notify": false,
+    "bark_step": "skipped",
+    "owner_live_readback": "main strict=true/enforce_admins=true/verify app15368; settings unchanged",
+    "decision": "use accessible branch protection summary and ordinary expected-head merge; existing strict checks are enforced atomically by GitHub; no administrator credential or bypass",
+    "temporary_resources": "remote/local branch deleted; worktree removed; absence verified"
   }
 }

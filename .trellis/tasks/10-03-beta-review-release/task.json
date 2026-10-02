@@ -15,14 +15,14 @@
   "branch": "feat/beta-review-release",
   "base_branch": "main",
   "worktree_path": null,
-  "commit": "27d7ebf",
-  "pr_url": null,
+  "commit": "9fa79ae",
+  "pr_url": "https://github.com/srcheng17/georelay/pull/11",
   "subtasks": [],
   "children": [
     "10-03-main-image-smoke"
   ],
   "parent": null,
   "relatedFiles": [],
-  "notes": "2026-10-03 用户开始批准实施，范围仅GHCR。本地实现完成，完整131/131、实际arm64主应用105迁移/login/legal/compiled address及故障/取消清理、adapter34/34通过，Trellis全域审查通过。用户已回复行确认3.4计划，本次执行单个本地提交；云端双架构/Actions token保护merge dispatch/真实Bark待验收，BARK_URL缺失。未push/创建PR或外部写入，bootstrap需用户明确审阅合并。 用户最新明确授权“合并，验证”；已整合main c8a6e83地址-only改动，当前执行本次PR云端双架构+beta检查通过后合并与main正式GHCR/latest验证；不更新运行容器。",
+  "notes": "用户明确授权本任务合并验证及未来条件自动合并，范围仅GHCR。PR10/main5727正式run37072746968双架构实际启动/105迁移/adapter34与正式latest回读成功。BARK_URL安全配置，多次真实失败准确通知，临时failure/protection probe分支及目录已清理。PR11 c12beta37074314019双架构/verify/pub/索引/alias全部成功，但默认token Graph保护读取FORBIDDEN而阻止merge/dispatch。只读同权限探针37076000025证明GET branches/main摘要可见，strict详情403/Graph FORBIDDEN；现有main strict/admin/verify owner读回仍有效，设置未改。最小修正用公开protected/enabled/everyone/verify15368 gate与GitHub普通expected-head merge原子执行server strict，不新增admin凭据或bypass。控制器15/15，本次修正云端beta/可信main安装/默认token实际merge dispatch待验收，不更新运行容器。",
   "meta": {}
 }

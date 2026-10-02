@@ -71,3 +71,13 @@ Main image smoke passed: /sign_in HTTP 200, login HTML verified; migrations=105;
 ## 父任务最终整合补充
 
 父任务已获用户“开始”实施授权，beta/条件合并/失败通知代码已实施并进入最终审查；上文“父任务尚未实现”为子任务完成时的历史状态。最终脚本现增加 `/notice`、`/license` 和编译后地址 RPC 检查，正常输出含 `compiled address checks passed`；父任务实际本机 arm64 整链复跑仍完成105项迁移，默认/坏入口/错误端口/TERM均符合预期且零容器/网络残留。最新结果见 [父任务 runtime-results.json](../10-03-beta-review-release/runtime-results.json)，完整最终集成结果见父任务 validation.md。云端双架构仍待验证。
+
+## Final shared-preparation cloud acceptance (2026-10-03)
+
+The final shared prepare path uses the address-only official source and two strict patches. Historical local branded-image evidence above does not establish the final image result.
+
+- PR10 exact head `4dce3a817fd0608fe7e9e3b271e4cd4562dd0ed6`, beta run [37071951401](https://github.com/srcheng17/georelay/actions/runs/37071951401): native amd64 and arm64 each passed default release startup, `/sign_in` HTTP 200 and meaningful login HTML, 105 database migrations, core tables and compiled address runtime checks. Adapter packaged code passed 34/34 on each architecture. verify and publication passed.
+- User-authorized ordinary expected-head merge produced `5727c65a9eda47869bfea1b79679e6899ce829a5`; main run [37072746968](https://github.com/srcheng17/georelay/actions/runs/37072746968) independently repeated the same actual two-architecture runtime and adapter checks before formal publication. Both stable indexes, OCI revision/version/source and all manifest/config digests were verified, and `latest` matched the checked formal indexes.
+- CI calls `scripts/test_main_image.sh` before `docker save` and upload; the script retains the main image default ENTRYPOINT/CMD, starts a fresh PostgreSQL on an internal temporary network without host ports or production mounts, and only returns success after HTTP/SQL/compiled-address checks and resource cleanup. Failure runs demonstrate that tests failing earlier prevent publication; they are not claimed as main startup successes.
+
+Parent cloud acceptance details and fixed digests: `../10-03-beta-review-release/cloud-validation.json`. The parent still verifies conditional default-token merge/dispatch; running production containers remain outside scope.

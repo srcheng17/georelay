@@ -221,7 +221,7 @@ docker compose up -d teslamate georelay-adapter
 
 在仓库 Settings → Secrets and variables → Actions 添加 repository secret `BARK_URL`，保存 HTTPS Bark endpoint；真实地址/设备 key 不进入代码、PR 或日志。GitHub hosted runner 必须能访问该 endpoint。先完成 payload dry-run、模拟接收及响应验证；Secret 缺失时明确报告未配置，不报告通知成功。请求有界重试，结果 uncertain 时不盲目重复发送；跨 workflow 重跑不承诺服务端幂等。
 
-首次控制器 PR 仍须维护者明确审阅/合并，进入 main 后 workflow_run 自动化才生效。保留 strict verify 分支保护与 Actions 来源，不启用管理员 bypass 或新增 PAT。updater 创建 PR/dispatch；独立控制器完成已授权的条件合并与 main dispatch。异常 pin/分支来源停止处理，已运行或成功发布的同提交不重复触发。Bark 配置及首次生效后的实际自动链路需单独验收。
+首次控制器 PR 仍须维护者明确审阅/合并，进入 main 后 workflow_run 自动化才生效。保留 strict verify 分支保护与 Actions 来源，不启用管理员 bypass 或新增 PAT。控制器读取公开保护摘要确认所有人必须通过 verify；普通 merge 接口原子执行已有 strict 规则。Actions token 无权读取 strict 详情，不为此申请管理员凭据。updater 创建 PR/dispatch；独立控制器完成已授权的条件合并与 main dispatch。异常 pin/分支来源停止处理，已运行或成功发布的同提交不重复触发。Bark 配置及首次生效后的实际自动链路需单独验收。
 
 首次发布 package 需设置 public 并实际核验匿名拉取；公开 repo 不代表 package 自动公开。OCI source/revision/version 对应实际 tested commit；共享 prepare、pin 与补丁可重建镜像。
 
