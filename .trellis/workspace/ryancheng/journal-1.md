@@ -430,3 +430,25 @@ Integrated docs and Paseo-only main advances into feat/image-lifecycle, preservi
 ### Next Steps
 
 - Verify latest native amd64 and arm64 PR checks; leave PR open without auto-merge for user review
+
+
+## Session 14: GeoRelay neutral images and verified Dockhand switch
+<!-- trellis-session: v=2 fp=57a7dd59f4f08421 -->
+
+**Date**: 2026-10-03
+**Task**: GeoRelay neutral images and verified Dockhand switch
+**Branch**: `feat/georelay-image-names`
+
+### Summary
+
+Preserved fixed georelay/georelay-adapter package names across source repository renames. Independent 89-test suite and static checks passed. Isolated restore, token decryption, migrations, real public-landmark geocoding and persistence passed. Dockhand switched the two already published main 0b0e6ac images; fresh rollback dump validated, production web/APIs/collector healthy, secrets and core infra preserved. PR 8 remains open for review with auto-merge off; native PR checks are being observed, no main merge.
+
+### Git Commits
+
+| Hash | Message |
+|------|---------|
+| `6c024b3` | fix(images): preserve GeoRelay package names across repo renames |
+
+### Status
+
+[OK] **Completed**
