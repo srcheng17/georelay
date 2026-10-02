@@ -207,3 +207,25 @@ Implemented and verified mainland AMap / overseas OSM sidecar and fixed-release 
 ### Next Steps
 
 - 推送当前功能分支并核对最终GitHub verify；不合并、发布或部署。
+
+
+## Session 7: README stack setup
+<!-- trellis-session: v=2 fp=f2ef503ec4be37e8 -->
+
+**Date**: 2026-10-02
+**Task**: README stack setup
+**Branch**: `feat/amap-adapter`
+
+### Summary
+
+中英文 README 直接提供并入现有 TeslaMate stack 的局部配置与两镜像本地构建方法。虚构 Compose 合并保留原设置、默认及自定义同网、持久卷和安全配置检查通过；50 个链接锚点、GitHub GFM 渲染和独立审查通过。未修改生产或发布镜像。
+
+### Git Commits
+
+| Hash | Message |
+|------|---------|
+| `ce2586ae82c3e3c17db9ca289bfe5e0ef47e759f` | docs: show adapter setup in an existing TeslaMate stack |
+
+### Status
+
+[OK] **Completed**
