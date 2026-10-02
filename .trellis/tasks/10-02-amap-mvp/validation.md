@@ -7,7 +7,7 @@
 - 隔离Elixir1.20.3/OTP29 + PostgreSQL18：编译warnings-as-errors、格式检查和105项ExUnit通过，包含负signed bigint实际数据库roundtrip。
 - Python编译、Shell语法、Compose、git diff --check通过；项目未配置独立类型检查器。
 - adapter镜像构建通过；UID10001、只读rootfs、无网络/Key/host port、独立临时卷下health和许可检查通过；容器与卷已清理。
-- 独立reviewer全范围复核通过。GitHub完整官方镜像构建/checks结果完成后追加。
+- 独立reviewer全范围复核通过。GitHub完整检查已通过：https://github.com/srcheng17/teslamate/actions/runs/36995771539 ，对应代码提交 f09ecd0594b60177fae61b93d8de7c425f5735ce；耗时5分30秒，包含两个linux/amd64镜像构建、上游测试和无Key容器健康检查。publish按预期跳过，未推送镜像或部署。
 
 ## 官方锁定依赖公告
 
