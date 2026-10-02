@@ -33,4 +33,4 @@ Energy/phase migrations cannot be undone by image downgrade; rollback requires t
 
 ## Pull request
 
-The package-name source optimization is separate from the already published runtime content used above. The task branch will be pushed for review; no main/PR merge is authorized or performed. Its own native PR CI results will be recorded after completion.
+The package-name source optimization is separate from the already published runtime content used above. [PR #8](https://github.com/srcheng17/georelay/pull/8) is open from `feat/georelay-image-names`; auto-merge is disabled and no main/PR merge is authorized or performed. Local/full-scope checks passed; native PR checks are tracked on the PR and will be reported to the user when they finish.
