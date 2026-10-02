@@ -1,0 +1,6 @@
+{
+  "command": "python3 -m unittest discover -s tests -v",
+  "exit": 0,
+  "seconds": 86.203,
+  "summary": "----------------------------------------------------------------------\nRan 131 tests in 86.132s\n\nOK"
+}

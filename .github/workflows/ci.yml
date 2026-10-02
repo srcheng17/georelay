@@ -1,4 +1,5 @@
 name: Validate and build
+run-name: images/${{ github.event_name }}/${{ github.event.pull_request.number || inputs.source_pr || '0' }}/${{ github.event.pull_request.head.sha || github.sha }}/${{ (inputs.publish || github.event_name == 'pull_request' || github.event_name == 'push') && 'publish' || 'check' }}/${{ inputs.expected_main_sha || '-' }}
 
 on:
   pull_request:
@@ -7,9 +8,17 @@ on:
   workflow_dispatch:
     inputs:
       publish:
-        description: Publish checked versions and latest (main or upstream/<stable-tag>; no deployment)
+        description: Publish checked images (main stable/latest, same-repository branch beta)
         type: boolean
         default: false
+      expected_main_sha:
+        description: Expected merge commit for an automated main publication
+        type: string
+        default: ''
+      source_pr:
+        description: Associated PR number for a beta candidate or merged main publication
+        type: string
+        default: ''
 
 permissions:
   contents: read
@@ -24,21 +33,33 @@ jobs:
     timeout-minutes: 10
     outputs:
       image_required: ${{ steps.changes.outputs.image_required }}
+      source_sha: ${{ steps.source.outputs.source_sha }}
+      channel: ${{ steps.source.outputs.channel }}
+      version: ${{ steps.source.outputs.version }}
+      pr_number: ${{ steps.source.outputs.pr_number }}
+      publish_required: ${{ steps.source.outputs.publish_required }}
     steps:
       - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4
         with:
+          ref: ${{ github.event.pull_request.head.sha || github.sha }}
           fetch-depth: 0
           persist-credentials: false
+      - name: Bind tested source and publication channel
+        id: source
+        run: python3 scripts/image_context.py
       - name: Decide whether images are required
         id: changes
+        env:
+          TESTED_SHA: ${{ steps.source.outputs.source_sha }}
         run: python3 scripts/ci_changes.py
       - name: Whitespace checks
         run: git diff --check
       - name: Python checks for metadata-only changes
-        if: steps.changes.outputs.image_required == 'false'
+        if: always() && steps.changes.outputs.image_required == 'false'
         run: python3 -m unittest discover -s tests -v
 
   build:
+    name: build-${{ matrix.architecture }}
     needs: checks
     if: needs.checks.outputs.image_required == 'true'
     strategy:
@@ -56,6 +77,7 @@ jobs:
     steps:
       - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4
         with:
+          ref: ${{ github.event.pull_request.head.sha || github.sha }}
           persist-credentials: false
       - name: Check native runner architecture
         env:
@@ -67,17 +89,13 @@ jobs:
         run: python3 scripts/prepare_upstream.py "$RUNNER_TEMP/teslamate-upstream"
       - name: Upstream contract tests in isolated containers
         run: bash scripts/test_upstream.sh "$RUNNER_TEMP/teslamate-upstream"
-      - name: Version from reviewed pin and tested commit
-        id: version
-        run: |
-          tag=$(python3 -c 'import json; print(json.load(open("upstream.json"))["tag"])')
-          echo "value=${tag}-georelay-${GITHUB_SHA}" >> "$GITHUB_OUTPUT"
       - name: Build adapter and patched TeslaMate
         env:
-          IMAGE_VERSION: ${{ steps.version.outputs.value }}
+          IMAGE_VERSION: ${{ needs.checks.outputs.version }}
+          SOURCE_SHA: ${{ needs.checks.outputs.source_sha }}
           IMAGE_ARCHITECTURE: ${{ matrix.architecture }}
         run: |
-          labels=(--label "org.opencontainers.image.source=https://github.com/$GITHUB_REPOSITORY" --label "org.opencontainers.image.revision=$GITHUB_SHA" --label "org.opencontainers.image.version=$IMAGE_VERSION")
+          labels=(--label "org.opencontainers.image.source=https://github.com/$GITHUB_REPOSITORY" --label "org.opencontainers.image.revision=$SOURCE_SHA" --label "org.opencontainers.image.version=$IMAGE_VERSION")
           docker build --platform "linux/$IMAGE_ARCHITECTURE" "${labels[@]}" --label 'org.opencontainers.image.title=GeoRelay address adapter' -t georelay-adapter:checked adapter
           docker build --platform "linux/$IMAGE_ARCHITECTURE" "${labels[@]}" --label 'org.opencontainers.image.title=GeoRelay' -t georelay:checked "$RUNNER_TEMP/teslamate-upstream"
           for image in georelay-adapter georelay; do
@@ -87,6 +105,10 @@ jobs:
           done
           docker run --rm --entrypoint /bin/sh georelay:checked -c 'test -r /usr/share/doc/teslamate/LICENSE && test -s /usr/share/doc/teslamate/NOTICE && test -s /usr/share/doc/teslamate/TRADEMARK.md && test -s /usr/share/doc/teslamate/MODIFICATIONS.md'
           docker run --rm --entrypoint /bin/sh georelay-adapter:checked -c 'test -r /usr/share/doc/georelay-adapter/LICENSE && test -s /usr/share/doc/georelay-adapter/MODIFICATIONS.md'
+      - name: Adapter packaged-code test suite without external network
+        timeout-minutes: 5
+        run: |
+          exec docker run --rm --network none --name "georelay-adapter-suite-${GITHUB_RUN_ID}-${GITHUB_RUN_ATTEMPT}" --mount "type=bind,src=$GITHUB_WORKSPACE/tests,dst=/tests,readonly" --entrypoint python georelay-adapter:checked -c 'import sys, unittest; from adapter import server; assert server.__file__ == "/app/adapter/server.py"; result = unittest.TextTestRunner(verbosity=2).run(unittest.defaultTestLoader.discover("/tests", pattern="test_adapter.py")); sys.exit(not result.wasSuccessful())'
       - name: Adapter container health without a key or host port
         run: |
           container="amap-check-${GITHUB_RUN_ID}-${GITHUB_RUN_ATTEMPT}"
@@ -103,13 +125,16 @@ jobs:
             sleep 1
           done
           test "$healthy" = true
+      - name: Main application startup, migrations and address runtime contract
+        timeout-minutes: 5
+        run: exec bash scripts/test_main_image.sh georelay:checked georelay-adapter:checked
       - name: Preserve checked images for publication
-        if: (github.event_name == 'push' && github.ref == 'refs/heads/main') || (github.event_name == 'workflow_dispatch' && inputs.publish)
+        if: needs.checks.outputs.publish_required == 'true'
         env:
           IMAGE_ARCHITECTURE: ${{ matrix.architecture }}
         run: docker save -o "$RUNNER_TEMP/checked-images-$IMAGE_ARCHITECTURE.tar" georelay-adapter:checked georelay:checked
       - uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02 # v4
-        if: (github.event_name == 'push' && github.ref == 'refs/heads/main') || (github.event_name == 'workflow_dispatch' && inputs.publish)
+        if: needs.checks.outputs.publish_required == 'true'
         with:
           name: checked-images-${{ matrix.architecture }}
           path: ${{ runner.temp }}/checked-images-${{ matrix.architecture }}.tar
@@ -137,7 +162,7 @@ jobs:
 
   publish:
     needs: [checks, build, verify]
-    if: needs.checks.outputs.image_required == 'true' && needs.build.result == 'success' && needs.verify.result == 'success' && ((github.event_name == 'push' && github.ref == 'refs/heads/main') || (github.event_name == 'workflow_dispatch' && inputs.publish))
+    if: needs.checks.outputs.image_required == 'true' && needs.build.result == 'success' && needs.verify.result == 'success' && needs.checks.outputs.publish_required == 'true'
     concurrency:
       group: ghcr-publication-${{ github.repository }}
       cancel-in-progress: false
@@ -145,10 +170,12 @@ jobs:
     timeout-minutes: 30
     permissions:
       contents: read
+      pull-requests: read
       packages: write
     steps:
       - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4
         with:
+          ref: ${{ github.event.pull_request.head.sha || github.sha }}
           fetch-depth: 0
           persist-credentials: false
       - uses: actions/download-artifact@d3f86a106a0bac45b974a628896c90dbdf5c8093 # v4
@@ -159,5 +186,4 @@ jobs:
       - name: Publish only the checked multi-architecture version
         env:
           GHCR_TOKEN: ${{ secrets.GITHUB_TOKEN }}
-          PUBLISH_REQUESTED: ${{ inputs.publish }}
         run: bash scripts/publish_images.sh "$RUNNER_TEMP/checked-images"

@@ -46,7 +46,7 @@ def main():
         event = json.loads(Path(os.environ["GITHUB_EVENT_PATH"]).read_text(encoding="utf-8"))
     except (OSError, ValueError, KeyError):
         event = {}
-    required = images_required(os.environ.get("GITHUB_EVENT_NAME"), event, os.environ.get("GITHUB_SHA"))
+    required = images_required(os.environ.get("GITHUB_EVENT_NAME"), event, os.environ.get("TESTED_SHA", os.environ.get("GITHUB_SHA")))
     decision = "image_required=" + str(required).lower()
     if os.environ.get("GITHUB_OUTPUT"):
         with open(os.environ["GITHUB_OUTPUT"], "a", encoding="utf-8") as output:

@@ -1,0 +1,6 @@
+{"file": ".trellis/spec/backend/contracts.md", "reason": "现有 adapter 与上游地址契约"}
+{"file": ".trellis/spec/backend/quality-guidelines.md", "reason": "构建、发布、凭据与镜像保留约束"}
+{"file": ".trellis/tasks/10-03-beta-review-release/research/runtime-testing.md", "reason": "最终镜像测试入口、隔离资源与失败门禁"}
+{"file": ".trellis/tasks/10-03-beta-review-release/research/beta-retention.md", "reason": "beta 标签与现有保留策略兼容边界"}
+{"file": ".trellis/tasks/10-03-beta-review-release/research/auto-merge.md", "reason": "expected head/base、strict verify、显式 main dispatch 与失败关联"}
+{"file": ".trellis/tasks/10-03-main-image-smoke/validation.md", "reason": "复用已本地实证的默认入口/PG/HTTP/迁移/取消清理，云端仍待验证"}

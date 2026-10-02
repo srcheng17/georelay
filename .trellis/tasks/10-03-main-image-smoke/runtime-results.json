@@ -1,0 +1,43 @@
+[
+  {
+    "scenario": "default-release",
+    "exit": 0,
+    "seconds": 4.388,
+    "stdout": "Main image smoke passed: /sign_in HTTP 200, login HTML verified; migrations=105; core tables present",
+    "stderr": "",
+    "containers_remaining": 0,
+    "networks_remaining": 0,
+    "temporary_stdout_files_remaining": 0
+  },
+  {
+    "scenario": "broken-entrypoint",
+    "exit": 1,
+    "seconds": 0.832,
+    "stdout": "",
+    "stderr": "Main image smoke failed: app state=exited exit=1",
+    "containers_remaining": 0,
+    "networks_remaining": 0,
+    "temporary_stdout_files_remaining": 0
+  },
+  {
+    "scenario": "wrong-port-timeout",
+    "exit": 1,
+    "seconds": 5.102,
+    "stdout": "",
+    "stderr": "Main image smoke failed: HTTP readiness timeout",
+    "containers_remaining": 0,
+    "networks_remaining": 0,
+    "temporary_stdout_files_remaining": 0
+  },
+  {
+    "scenario": "cancel-TERM",
+    "exit": 143,
+    "seconds": 0.661,
+    "stdout": "",
+    "stderr": "",
+    "containers_remaining": 0,
+    "networks_remaining": 0,
+    "temporary_stdout_files_remaining": 0,
+    "signal_to_cleanup_seconds": 0.359
+  }
+]

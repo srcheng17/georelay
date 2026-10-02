@@ -1,0 +1,2 @@
+{"file": ".trellis/spec/backend/quality-guidelines.md", "reason": "主应用镜像隔离检查的契约与运行接口"}
+{"file": ".trellis/tasks/10-03-beta-review-release/research/runtime-testing.md", "reason": "主应用镜像隔离检查的契约与运行接口"}

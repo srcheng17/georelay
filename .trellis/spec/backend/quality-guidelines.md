@@ -6,11 +6,11 @@
 
 用户明确要求真实库核对时，可在 `BEGIN READ ONLY` +有界statement/lock timeout中抽样已结束事件的原始位置及关联地址；原记录仅留内存和隔离临时卷，不输出坐标/地址字符串、不作为fixture、不提交Git。先比较事件坐标与旧address坐标；不同点和不同provider的文字差异不能直接判错，同点地点名退化成道路需单列。省市区/道路、地点名和身份闭环分别验证；查后复读生产对照字段并清理临时资源，不写回或迁移旧身份。
 
-固定 `upstream.json` 中稳定 tag 和解引用 commit，下载到临时/忽略目录；先校验 commit 再 `git apply --check`，任何失败停止。保留上游 LICENSE/NOTICE。GitHub release 检测自动创建仅 pin 变更的上游分支与 PR，并显式触发双架构构建；影响镜像的 main push 或受控上游分支 dispatch 通过全部校验后自动发布版本镜像。仅文档、agent/Paseo/Trellis 设置改动运行轻量检查，手动 dispatch 始终完整构建。上游分支必须与 main 相比仅改 upstream.json，并匹配稳定 tag；不自动合并 PR。两架构都检查成功才从已测试产物发布索引，保留单名 verify 汇总检查，不得绕过测试。不自动部署、不自动提升 stable、不 force push。
+固定 `upstream.json` 中稳定 tag 和解引用 commit，下载到临时/忽略目录；先校验 commit 再 `git apply --check`，任何失败停止。保留上游 LICENSE/NOTICE。GitHub release 检测自动创建仅 pin 变更的上游分支与 PR，并显式触发双架构构建；影响镜像的 main push 通过全部校验后发布正式版本；同仓 PR 和受控分支 publish dispatch 先发布 beta。仅文档、agent/Paseo/Trellis 设置改动运行轻量检查，手动 dispatch 始终完整构建。上游分支必须与 main 相比仅改 upstream.json，并匹配稳定 tag；可信 main 控制器仅按下述 beta 契约条件合并。首次启用本流程的任务 PR 仍须用户明确审阅合并。两架构都检查成功才从已测试产物发布索引，保留单名 verify 汇总检查，不得绕过测试。发布范围仅 GHCR 正式镜像与 latest，不更新运行容器，不 force push。
 
 共享prepare路径在应用补丁前逐字核对LICENSE/NOTICE/TRADEMARK.md与仓库复核原文；缺失或变化停止，人工复核后更新随附文件。修改通知含相关日期并进入两个镜像，发布检查验证可读。GeoRelay是独立公开名称，镜像为georelay和georelay-adapter，保留旧包但不向其发布新版本；上游命名/图标变化需重新审查品牌补丁，不能静默跳过。修改版保留内部模块、数据库和MQTT兼容标识，不借重构改动数据契约。
 
-用户已授权维护两镜像的 `latest`。所有发布任务共用 publish job concurrency group；先验证两个版本索引，再复制已测试索引至 latest，不重新构建。推广前回读官方最新稳定版和源码状态，旧 pin 或过期源码跳过推广，网络/校验失败停止；GitHub 队列不保证 FIFO，不能仅凭串行认为版本不会倒退。每个 latest 必须回读为对应版本的同一双架构内容。两个 package 没有原子更新，任一推广或回读失败使 workflow 失败，不能报告双镜像完成。保留固定版本/digest用法；latest本身不会拉取或重建运行容器。
+用户已授权维护两镜像的 `latest`。所有发布任务共用 publish job concurrency group；先验证两个版本索引，再复制已测试索引至 latest，不重新构建。推广前校验当前 pin 对应官方稳定 release/tag/commit 并回读源码状态，过期 main 跳过推广，网络/校验失败停止；latest 跟随 main 已审阅 pin，尚未合入的官方新版本不阻断推广。GitHub 队列不保证 FIFO，不能仅凭串行认为版本不会倒退。每个 latest 必须回读为对应版本的同一双架构内容。两个 package 没有原子更新，任一推广或回读失败使 workflow 失败，不能报告双镜像完成。保留固定版本/digest用法；latest本身不会拉取或重建运行容器。
 
 改动最少的必要文件，不引入框架/ORM/插件层。构建流程本身要有失败测试。新增测试路径必须与 workflow 和 README 命令一致。
 
@@ -30,12 +30,12 @@ README 按使用者需要组织用途、功能和使用入口，验收数字、P
 
 ### 1. Scope / Trigger
 
-适用于 ci.yml 的改动范围判断、verify 汇总和 GHCR 保留工作流。普通任务分支 push 不发布；main 的镜像相关 push 和受控 publish dispatch 保留既有发布边界。
+适用于 ci.yml 的改动范围判断、verify 汇总和 GHCR 保留工作流。普通任务分支 push 不发布；main 的镜像相关 push/main publish dispatch 发布正式镜像，同仓 PR/受控分支 publish dispatch 发布 beta。fork/check-only 和轻量改动不发布。
 
 ### 2. Signatures
 
 - `python3 scripts/ci_changes.py`：从 GitHub 事件与实际 checkout 判断 `image_required=true|false`；缺少比较基线时要求构建。
-- 输入环境为 `GITHUB_EVENT_NAME`、`GITHUB_EVENT_PATH`、`GITHUB_SHA`；事件 JSON 使用 `pull_request.base.sha` 或 push 的 `before`。有效基线和目标必须是非零 40 位小写 hex。结果追加到 `GITHUB_OUTPUT` 并打印。
+- 输入环境为 `GITHUB_EVENT_NAME`、`GITHUB_EVENT_PATH`、`TESTED_SHA`（缺省 GITHUB_SHA）；事件 JSON 使用 `pull_request.base.sha` 或 push 的 `before`。有效基线和目标必须是非零 40 位小写 hex。结果追加到 `GITHUB_OUTPUT` 并打印。
 - `python3 scripts/retain_images.py --repository OWNER/REPO [--output PATH] [--apply]`：默认只读预览；显式 apply 才删除。
 - GitHub Packages 的 user/org container versions 分页 GET 和 version DELETE；GHCR manifest 按 digest 读取。publisher 与 retention 固定使用 `georelay`、`georelay-adapter`，由仓库 owner 决定命名空间；仓库 basename 改名不改变包名，OCI source/revision 仍跟随真实源码仓库。
 - 清理 workflow 手动输入 `dry_run` 默认为 true；只在 main 执行，每周定时 apply。
@@ -80,3 +80,92 @@ README 按使用者需要组织用途、功能和使用入口，验收数字、P
 错误：workflow 级 paths-ignore 跳过必需检查；正确：workflow 总触发，只跳过 Docker job，verify 判定有意跳过。
 
 错误：保留 latest 索引却按时间删除它引用的子镜像；正确：先计算所有保留索引的依赖，再删除整组历史。
+
+
+## Scenario: Main image startup gate
+
+### 1. Scope / Trigger
+
+每个原生 amd64/arm64 CI job 构建完成后、`docker save` 前验证主应用 release；同一已检查镜像用于发布。
+
+### 2. Signatures
+
+`bash scripts/test_main_image.sh <app-image> <adapter-probe-image>`；`MAIN_IMAGE_TIMEOUT_SECONDS` 缺省 120，只接受 1..600 整数。CI 使用 `exec bash scripts/test_main_image.sh ...`，step timeout 为 5 分钟。
+
+### 3. Contracts
+
+- 主镜像保留默认 ENTRYPOINT/CMD；连接新建 PostgreSQL 18 tmpfs，入口真实等待数据库并迁移，不预装 schema。
+- 独立 internal 网络与命名容器、虚构测试凭据，无 host port/生产卷；probe 复用已构建 adapter 的 Python 标准库。
+- `/sign_in` 必须 HTTP 200、无跳转、`text/html`，含 GeoRelay 和 access/refresh token 登录表单；`schema_migrations` 非空且 cars/addresses/positions/drives/charging_processes/settings 表存在。`/notice` 与 `/license` 返回对应法律原文。
+- 同网络 fixture 无外部 provider/Key，挂载的 RPC 检查调用最终 release 编译后的 Locations → Finch → fixture → 新 PG。验证负身份创建/刷新、坐标及行程充电关联保留、历史正身份不变；缺身份/502 明确失败，不写 Unknown、不做 reverse fallback。只输出固定成功标记。adapter suite 在已构建镜像内运行并断言模块来自 /app，只挂 tests、关闭外网。
+- Docker 操作有界且等待可中断；EXIT 清理容器、自动生成的卷和网络，回读确认没有容器残留，三项清理操作各限 2 秒；INT/TERM 先停止当前子进程。只有清理成功才输出通过，诊断只给固定原因与状态/退出码，不输出原始日志或配置。
+
+### 4. Validation & Error Matrix
+
+| 条件 | 结果 |
+| --- | --- |
+| 真实 HTTP 与迁移回读通过、清理成功 | 退出 0，允许保存镜像 |
+| DB/app 退出、探测或迁移失败、超时 | 非零退出，清理并阻断保存/发布 |
+| 清理失败 | 非零退出，不声称无残留 |
+| 入口 PID 收到 INT/TERM | 及时中断等待、清理，退出 130/143 |
+
+### 5. Good / Base / Bad Cases
+
+Base：无账号/地图 Key 的新库启动并返回登录页面。Good：损坏入口或错误端口被拒绝且无测试资源残留。Bad：仅 container running 或源码 ExUnit 通过就保存发布。
+
+### 6. Tests Required
+
+`tests/test_main_image.py` 覆盖默认入口/隔离参数、真实 probe 断言、退出/SQL/HTTP/超时/清理失败与阻塞 Docker 时取消；验证 workflow 两架构门禁早于 artifact 保存。实际构建镜像运行及故障检查单独记录，云端结果未取得时明确待验证。
+
+### 7. Wrong vs Correct
+
+错误：外层 Bash 启动前台子脚本，或在前台 Docker 包装进程结束后才处理信号。正确：CI `exec bash`、可中断等待并回收子进程后清理。源码测试不能替代最终镜像启动证据。
+
+
+## Scenario: Beta candidate merge and formal GHCR release
+
+### 1. Scope / Trigger
+
+同仓 PR 镜像改动或显式分支 publish dispatch 产生 beta；可信 main 的 workflow_run 控制器只对完成的 Validate and build 做判定。首次启用 PR 不自动合并自身，任务分支合入仍须用户明确授权。运行容器不在部署范围内。
+
+### 2. Signatures
+
+- `python3 scripts/image_context.py [--json]`：绑定实际 checkout、PR head、channel/version/source_pr/expected_main_sha；PR 不使用临时 merge SHA。
+- `bash scripts/publish_images.sh <checked-artifacts-directory>`：消费相同已测试 amd64/arm64 artifacts，不重建。
+- `python3 scripts/release_control.py --output PATH [--apply]`：缺省只读；workflow 从 main 显式 apply。
+- `python3 scripts/notify_bark.py --report PATH [--dry-run]`：仅可信失败 report；BARK_URL 只进发送步骤，不打印 endpoint/Key/响应原文。
+- CI run-name：`images/event/PR-or-0/tested-SHA/publish-or-check/expected-main-SHA-or--`。
+
+### 3. Contracts
+
+- 正式标签 `<upstream-tag>-georelay-<40hex>`，beta `<upstream-tag>-georelay-beta-<40hex>`；两 package 同标签，架构后缀 -amd64/-arm64，当前 PR alias 为 beta-pr-N。beta 不改 latest、不挤占正式保留十组；未知/beta 记录继续保护，清理延期。
+- publisher 严格校验官方稳定 release 的 tag→commit，OCI source/revision/version 与实际 source一致。浮动标签推广前回读 current PR/main，复制同版本索引并验 digest；任一 package失败则流程失败，不能声称原子双推广。
+- 成功候选必须同仓 open/non-draft、当前 head等于tested SHA、当前 main为head祖先；checks/build-amd64/build-arm64/verify/publish全成功，verify来自 Actions app15368和本run。两 beta索引各恰含linux/amd64、linux/arm64，manifest/config digest与OCI来源一致。
+- 固定只读GraphQL main ref.branchProtectionRule必须requiresStatusChecks=true、requiresStrictStatusChecks=true、isAdminEnforced=true且required verify由Actions app15368提供；读取失败拒绝merge，Actions token实际读取能力须云端验收，不新增管理员凭据。控制器不执行候选代码、不加载候选artifacts、不绕过保护。merge前再次回读head/base，用普通REST merge携带expected head SHA；正常过期成功候选静默跳过。
+- merge响应丢失先回读，不重复merge；已合并回读后dispatch main，携带expected_main_sha/source_pr。main检出/测试SHA必须等于expected；GITHUB_TOKEN合并push不触发CI，显式dispatch负责正式发布。普通main成功run不递归dispatch。
+- 失败通知独立于成功合并门禁：可信beta早期失败无artifacts也通知；main失败可关联已closed/merged PR，expected与actual不一致的失败仍通知。fork/check-only/metadata-only/正常过期成功候选不通知。metadata-only以本run checks中的精确step名 Python checks for metadata-only changes 已执行且非skipped来证明；CI用always()+image_required=false保证前序失败后仍执行。不得仅按build/publish skipped判轻量，因为镜像早期失败也可能跳过。仅固定阶段、SHA、PR/run链接和允许的job名进入payload。
+- Bark先dry-run，HTTP仅loopback测试可用；真实URL须HTTPS，禁止redirect。有界timeout/retry/backoff，2xx且JSON code200才算送达；缺Secret明确not_configured，terminal uncertain不得盲目再发。稳定key不保证Bark服务端去重，跨workflow重跑可能重复。
+
+### 4. Validation & Error Matrix
+
+| 条件 | 行为 |
+| --- | --- |
+| 成功且当前PR、base、保护、索引均有效 | apply模式expected-head merge，回读后main dispatch |
+| 成功但head/base已变、draft/closed或不可合并 | 无merge/dispatch，正常跳过 |
+| 失败beta且无产物；已合并main失败 | 独立Bark门禁，不要求成功索引或open PR |
+| 成功但job/verify/索引或保护无效 | 拒绝merge，报告固定失败阶段 |
+| merge API响应不确定 | 单次回读，不能重复merge |
+| 已merge但dispatch未确认 | 报告merged SHA，通知正式发布触发未确认 |
+| Bark缺配置、拒绝、超时或响应未确认 | 非成功结果，不打印敏感值、不声称送达 |
+
+### 5. Good / Base / Bad Cases
+
+Base：同仓PR完整双架构验证后只生成beta。Good：当前候选经可信控制器合并，再重新验证merge commit并发布main正式镜像。Bad：只看run success、不读current head或严格保护即合并；把Bark dry-run/本机arm64说成云端链路完成。
+
+### 6. Tests Required
+
+标准库 fixtures覆盖source SHA/channel、fork/dispatch、stable/beta/latest隔离、同artifact发布、registry digest/OCI、成功/陈旧/保护拒绝、merge读回/dispatch不确定、beta无产物与closed main失败。Bark真实loopback验证POST、dry-run零网络、响应/重试/脱敏。主镜像实际启动和adapter packaged suite单独留证，云端两native job及真实Bark未取得时明确待验证。
+
+### 7. Wrong vs Correct
+
+错误：GITHUB_TOKEN merge后等push触发发布，或main更新latest仍要求未合入的官方最新pin。正确：显式expected-SHA main dispatch，latest跟随main已审阅pin，严格tag→commit检查保留。

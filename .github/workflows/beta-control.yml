@@ -1,0 +1,47 @@
+name: Beta merge and release failures
+
+on:
+  workflow_run:
+    workflows: [Validate and build]
+    types: [completed]
+
+permissions:
+  contents: read
+
+# Serialize the final expected-head merge and dispatch; never cancel a merge midway.
+concurrency:
+  group: beta-merge-${{ github.repository }}
+  cancel-in-progress: false
+
+jobs:
+  control:
+    if: github.event.workflow_run.head_repository.full_name == github.repository
+    runs-on: ubuntu-latest
+    timeout-minutes: 15
+    permissions:
+      # Also read main's protection rule through a read-only GraphQL query.
+      # No administration permission or bypass token is requested.
+      contents: write
+      actions: write
+      pull-requests: read
+      checks: read
+      packages: read
+    steps:
+      # Always execute trusted main code. No candidate checkout or artifact download.
+      - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4
+        with:
+          ref: main
+          persist-credentials: false
+      - name: Verify candidate and conditionally merge and dispatch main
+        id: control
+        env:
+          GH_TOKEN: ${{ github.token }}
+          GITHUB_TOKEN: ${{ github.token }}
+        run: python3 scripts/release_control.py --apply --output "$RUNNER_TEMP/release-control.json"
+      - name: Notify failures through Bark
+        if: always() && steps.control.outputs.notify == 'true'
+        env:
+          BARK_URL: ${{ secrets.BARK_URL }}
+        run: |
+          python3 scripts/notify_bark.py --report "$RUNNER_TEMP/release-control.json" --dry-run
+          python3 scripts/notify_bark.py --report "$RUNNER_TEMP/release-control.json"
