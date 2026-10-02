@@ -1,6 +1,6 @@
 # 高德地址适配指南
 
-本指南说明社区修改版的地址适配服务。项目介绍、官方功能与来源见[首页](../README.md)，修改范围见 [MODIFICATIONS.md](../MODIFICATIONS.md)。当前固定官方 v4.3.0，准确 tag 与 commit 见 [upstream.json](../upstream.json)。
+本指南介绍高德地址服务的配置与维护。项目介绍和官方功能见[首页](../README.md)，修改范围见 [MODIFICATIONS.md](../MODIFICATIONS.md)，构建使用的官方版本见 [upstream.json](../upstream.json)。
 
 ## 架构与范围
 

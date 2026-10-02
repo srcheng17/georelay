@@ -1,0 +1,30 @@
+{
+  "id": "readme-humanizer",
+  "name": "readme-humanizer",
+  "title": "README 文字与结构优化",
+  "description": "使用用户指定Humanizer v3.0.0改写README，在官方简介功能截图基础上自然呈现高德适配；消除固定版本定位与会话验收口吻，准确说明现有版本维护流程。",
+  "status": "in_progress",
+  "dev_type": null,
+  "scope": null,
+  "package": null,
+  "priority": "P2",
+  "creator": "ryancheng",
+  "assignee": "ryancheng",
+  "createdAt": "2026-10-02",
+  "completedAt": null,
+  "branch": "feat/amap-adapter",
+  "base_branch": "main",
+  "worktree_path": null,
+  "commit": null,
+  "pr_url": "https://github.com/srcheng17/teslamate/pull/1",
+  "subtasks": [],
+  "children": [],
+  "parent": null,
+  "relatedFiles": [
+    "README.md",
+    "docs/AMAP.md",
+    ".trellis/spec/backend/quality-guidelines.md"
+  ],
+  "notes": "",
+  "meta": {}
+}
