@@ -19,3 +19,9 @@ If you're using Codex or another agent-capable tool, additional project-scoped h
 Managed by Trellis. Edits outside this block are preserved; edits inside may be overwritten by a future `trellis update`.
 
 <!-- TRELLIS:END -->
+
+## Git 与 Pull Request 规则
+
+- 默认在独立任务分支开发；push 或创建、更新 PR 后，报告分支、PR 和验证结果，等待用户审阅。
+- 只有用户明确要求合并当前 PR 或分支时，才能将任务改动合入 `main`。未经授权，不得执行 PR merge、启用 auto-merge，或通过 squash、rebase、cherry-pick、直接 push `main` 绕过这一要求。
+- “继续”“push”“提交”“完成任务”和 CI 通过均不构成合并授权；之前对其他改动的合并授权不延用于当前改动。

@@ -1,0 +1,24 @@
+{
+  "scripts": {
+    "test": {
+      "command": "python3.13 -m unittest discover -s tests -v"
+    },
+    "check": {
+      "command": "git diff --check"
+    },
+    "check-upstream": {
+      "command": "python3.13 scripts/check_release.py"
+    }
+  },
+  "metadataGeneration": {
+    "branchName": {
+      "instructions": "Use <type>/<short-kebab-case-description> in English. Choose type from feat, fix, docs, chore, ci, refactor, or test."
+    },
+    "commitMessage": {
+      "instructions": "Use Conventional Commits with a scope: <type>(<scope>): <short description>. Write the description in English. Use a scope that describes the changed component, such as adapter, upstream, release, or docs."
+    },
+    "pullRequest": {
+      "instructions": "Write the title and body in English. Start with a Summary and include a Test plan section. List only checks actually performed and their results; mark unperformed checks as Not run. Describe configuration, persistent-data, or image-publication impact when relevant. Never include API keys, credentials, or real vehicle locations. Pushing changes or opening a PR does not authorize merging. Leave the PR open and do not enable auto-merge unless the user explicitly requests merging this specific PR or branch."
+    }
+  }
+}
