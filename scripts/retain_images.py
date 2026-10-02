@@ -144,7 +144,7 @@ def manifest_graph(owner, package, versions, fetch):
 def plan_retention(repository, api=github, fetch=registry_manifest):
     if not isinstance(repository, str) or not re.fullmatch(r"[A-Za-z0-9][A-Za-z0-9_.-]*/[A-Za-z0-9][A-Za-z0-9_.-]*", repository):
         raise ValueError("Invalid GitHub repository")
-    owner, name = repository.split("/")
+    owner = repository.split("/")[0]
     source = api("GET", "repos/" + repository)
     if source["full_name"].lower() != repository.lower() or source["owner"]["login"].lower() != owner.lower():
         raise ValueError("Repository owner does not match")
@@ -153,7 +153,7 @@ def plan_retention(repository, api=github, fetch=registry_manifest):
         raise ValueError("Unsupported repository owner")
     prefix = ("users/" if owner_type == "User" else "orgs/") + owner + "/packages/container/"
     packages, groups = {}, set()
-    for package in (name.lower(), name.lower() + "-adapter"):
+    for package in ("georelay", "georelay-adapter"):
         endpoint = prefix + package
         metadata = api("GET", endpoint)
         if (metadata["name"] != package or metadata["package_type"] != "container"

@@ -12,7 +12,7 @@ Self-hosted drive and charging records with address lookup through AMap, Baidu M
 
 Add `georelay-adapter` to your existing TeslaMate stack and use the patched TeslaMate image. Both images support `linux/amd64` and `linux/arm64`. The official TeslaMate image does not support `NOMINATIM_BASE_URL`.
 
-GeoRelay images are publicly available on GHCR. The fragment below uses `latest` by default. To pin a release, set `GEORELAY_VERSION` to the same version from the [application image](https://github.com/users/srcheng17/packages/container/package/georelay) and [adapter image](https://github.com/users/srcheng17/packages/container/package/georelay-adapter) pages.
+The `georelay` application and `georelay-adapter` images are publicly available on GHCR. Their names cover all supported address providers. The fragment below uses `latest` by default. To pin a release, set `GEORELAY_VERSION` to the same version from the [application image](https://github.com/users/srcheng17/packages/container/package/georelay) and [adapter image](https://github.com/users/srcheng17/packages/container/package/georelay-adapter) pages.
 
 Set `AMAP_KEY` and `NOMINATIM_USER_AGENT` in your stack's `.env`; see [.env.example](.env.example). The default uses AMap Web Services in mainland China and OSM elsewhere. The User-Agent must include your application name and contact information. To use Baidu instead, set `MAINLAND_PROVIDER=baidu`, `BAIDU_AK` and the matching `BAIDU_SK`.
 
