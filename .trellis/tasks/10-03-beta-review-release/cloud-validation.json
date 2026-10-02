@@ -18,7 +18,7 @@
     }
   },
   "pr": "https://github.com/srcheng17/georelay/pull/10",
-  "beta_run": null,
+  "beta_run": 37070822103,
   "main_run": null,
   "beta_runs": [
     {
@@ -49,6 +49,23 @@
       },
       "verify": "success",
       "publish": "success"
+    },
+    {
+      "id": 37070822103,
+      "head": "66b9001b888da9a3b71dc3f6cff269b842de96ee",
+      "conclusion": "failure",
+      "build-arm64": {
+        "startup": "success",
+        "migrations": 105,
+        "adapter_tests": 34
+      },
+      "build-amd64": {
+        "startup": "skipped",
+        "adapter_tests": "33/34; slow-drip subprocess exhausted 0.3s startup budget before first HTTP request"
+      },
+      "verify": "failure",
+      "publish": "skipped",
+      "cause": "test fixture assumed interpreter startup and adapter import complete within 300ms; deadline correctly returned 504 and wall-clock bound passed"
     }
   ],
   "linux_fixture_fix": {
@@ -75,5 +92,15 @@
     "cause": "GitHub run.name equals custom run-name; workflow.name is the logical workflow name",
     "fix": "bind source to verified workflow id/path/name; keep strict display_title parsing",
     "tests": "14/14; old guard fails with real-shape fixture; real apply=False now candidate_ready"
+  },
+  "slow_drip_fixture_fix": {
+    "files": [
+      "tests/test_adapter.py"
+    ],
+    "root_cause": "0.3s subprocess budget can expire during interpreter startup/import before actual HTTP in packaged CI",
+    "test_only": "five-second drip; two-second subprocess budget; three-second wall-clock bound; actual HTTP assertion retained; production adapter unchanged",
+    "linux_arm64_before": "controlled 0.4s startup delay reproduces empty HTTP requests; original 504/wall bound pass and child exited",
+    "linux_arm64_after": "same delay: real HTTP, 504, wall bound and child SIGKILL verified; elapsed 2.138s",
+    "linux_arm64_packaged_suite": "34/34 in 13.522s; no external network; imported /app/adapter/server.py; container removed"
   }
 }

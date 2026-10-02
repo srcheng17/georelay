@@ -55,3 +55,9 @@ Main image smoke passed: /sign_in HTTP 200, login HTML verified; migrations=105;
 | 正式GHCR/latest发布、运行容器部署 | 未执行；发布范围仅GHCR，运行容器不在任务范围 |
 
 任务保持in_progress；本地实现及必要检查完成，用户已回复“行”确认Trellis3.4具体计划，本次执行一个本地新提交。bootstrap实现不自动合并自身，不启用当前PR auto-merge。push/PR后应报告分支、PR、云端验证并等待用户审阅。
+
+## Final-head CI and packaged test timing (2026-10-03)
+
+Run 37070822103 tested 66b9001. arm64 adapter 34/34 and actual default main startup passed: HTTP 200, 105 migrations, core tables and compiled address contract. amd64 packaged adapter slow-drip test failed before main startup: its 300 ms subprocess budget expired before the first HTTP request. verify failed and publish was skipped. This run provides no amd64 main startup result.
+
+An isolated Linux arm64 container with a controlled 400 ms child startup delay reproduced the old assertion while 504, wall-clock bound and child termination passed. The test-only fix uses a 5 s simulated drip, 2 s total subprocess deadline and 3 s wall-clock bound. Under the same delay, the child reached real HTTP, returned 504 and was killed (SIGKILL) in 2.138 s. The packaged adapter suite passed 34/34 in 13.522 s with no external network and no container left behind. Production adapter deadlines are unchanged. The new pushed head still requires cloud validation on both architectures.

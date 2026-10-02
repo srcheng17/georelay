@@ -72,7 +72,7 @@ class MockHTTP(BaseHTTPRequestHandler):
         self.end_headers()
         try:
             if self.path.startswith("/slow"):
-                for _ in range(30):
+                for _ in range(100):  # Five seconds: exceeds the child's total deadline.
                     self.wfile.write(b" ")
                     self.wfile.flush()
                     time.sleep(0.05)
@@ -737,8 +737,9 @@ class AdapterTest(unittest.TestCase):
                 return real_run([sys.executable, "-c", code], **kwargs)
             started = time.monotonic()
             with patch("adapter.server.subprocess.run", side_effect=local_child):
-                self.error(504, server.upstream, "amap", "fake-test-key", LAT, LON, "", "", 0.3)
-            self.assertLess(time.monotonic() - started, 0.8)
+                # Includes interpreter/import startup on a loaded CI runner.
+                self.error(504, server.upstream, "amap", "fake-test-key", LAT, LON, "", "", 2)
+            self.assertLess(time.monotonic() - started, 3)
             self.assertTrue(mock.requests)
 
     @patch("adapter.server.upstream", return_value=AMAP)
