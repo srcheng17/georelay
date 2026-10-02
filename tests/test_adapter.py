@@ -118,6 +118,27 @@ class AdapterTest(unittest.TestCase):
         self.assertAlmostEqual(lat, 39.9102264981, places=8)
         self.assertEqual(server.gcj02(OSM_LAT, OSM_LON), (float(OSM_LON), float(OSM_LAT)))
 
+    def test_amap_name_uses_first_aoi_then_first_poi_then_existing_fallbacks(self):
+        cases = [
+            ([{"name": " 虚构园区甲 "}], [{"name": "虚构设施乙"}], "虚构楼宇", "虚构小区", "测试路", "虚构园区甲"),
+            ([{"name": []}, {"name": "不取第二个AOI"}], [{"name": " 虚构设施乙 "}], "虚构楼宇", "虚构小区", "测试路", "虚构设施乙"),
+            ("invalid", [None, {"name": "不取第二个POI"}], "虚构楼宇", "虚构小区", "测试路", "虚构楼宇"),
+            ({}, 42, [], "虚构小区", "测试路", "虚构小区"),
+            (None, [{"name": " "}], {}, None, "测试路", "测试路"),
+            ([5], [], None, "", [], AMAP["regeocode"]["formatted_address"]),
+            ([], {"name": "非列表POI"}, "虚构楼宇", "", "测试路", "虚构楼宇"),
+        ]
+        for aois, pois, building, neighbourhood, road, expected in cases:
+            with self.subTest(expected=expected, aois=aois, pois=pois):
+                payload = copy.deepcopy(AMAP)
+                payload["regeocode"].update({"aois": aois, "pois": pois})
+                parts = payload["regeocode"]["addressComponent"]
+                parts.update({"building": {"name": building}, "neighborhood": {"name": neighbourhood}})
+                parts["streetNumber"]["street"] = road
+                result = server.nominatim(payload, 1, LAT, LON)
+                self.assertEqual(result["name"], expected)
+                self.assertEqual(result["namedetails"]["name"], expected)
+
     @patch("adapter.server.upstream", return_value=AMAP)
     def test_reverse_lookup_restart_language_ttl_and_original_wgs84(self, upstream):
         first = self.adapter.reverse(LAT, LON, "zh-cn")
@@ -378,6 +399,7 @@ class AdapterTest(unittest.TestCase):
                 self.assertEqual(self.adapter.lookup("N-1", "zh"), [result])
             query = urllib.parse.parse_qs(urllib.parse.urlsplit(mock.requests[-1][0]).query)
             self.assertEqual(query["location"], ["116.40371358,39.91022650"])
+            self.assertEqual(query["extensions"], ["all"])
             self.assertNotEqual(query["location"][0], f"{LON},{LAT}")
             with patch.object(server, "OSM_URL", url + "/osm"):
                 self.assertEqual(server.fetch("osm", "", OSM_LAT, OSM_LON, "fr", USER_AGENT, 1), OSM)

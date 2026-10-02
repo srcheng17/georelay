@@ -18,6 +18,8 @@
 
 大陆AMap请求临时GCJ02，境外OSM保留WGS84。GCJ矩形不能充当国界；框内AMap失败可由OSM国家/港澳ISO字段确认非大陆，不能把大陆AMap失败静默替换成OSM成功。香港澳门OSM可能country_code=cn，须识别 ISO3166-2-* 的 CN-HK/CN-MO。
 
+AMap regeo请求 `extensions=all`。name优先 `regeocode.aois[0].name` → `pois[0].name` →建筑→小区→道路→完整地址；缺失/空数组/非字符串须规范化，详情列表及首项错误结构不得异常。只取供应商排序的首项，不遍历任意周边地点。`name` 与 `namedetails.name` 一致，不能用道路替代已返回的AOI/POI。文字随TTL正常刷新，身份不变。
+
 OSM刷新按可信来源批量lookup，不盲转外部正ID。按type/id集合匹配而非zip；拒绝缺项/重复/额外项，同一来源展开多个本地身份。公共OSM用NOMINATIM_USER_AGENT、缓存与本地卷flock，每次完成后至少间隔1秒。
 
 AMAP_KEY/AMAP_KEY_FILE只给sidecar且互斥；ADAPTER_DB永久卷；缓存默认86400秒；网络默认8秒，无重试；reverse总预算min(25,2*timeout+1)，lookup默认20秒。真实Key不属于自动测试。
@@ -47,6 +49,8 @@ NOMINATIM_BASE_URL是新增补丁变量，默认官方OSM。只接受HTTP/HTTPS 
 ## 6. Tests Required
 
 tests/test_adapter.py 检查转换/原值、永久ID并发/TTL/重启/语言、地域错误边界、50项批量和同来源多身份、慢滴网络硬超时、HTTP状态/隐私、在线备份。tests/test_upstream.py 检查错pin/冲突fail closed；补丁内ExUnit验证默认/自定义URL、pool/proxy、负ID数据库roundtrip及错误不变Unknown。CI构建两个镜像并检查非root健康与许可。
+
+名称回归用虚构AOI/POI验证优先级与缺失fallback，并由本地HTTP测试实际请求参数确认 `extensions=all`；不能只mock详细响应而漏掉真实请求参数。
 
 ## 7. Wrong vs Correct
 

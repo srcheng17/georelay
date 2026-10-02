@@ -95,7 +95,7 @@ def fetch(provider, key, lat, lon, language, user_agent, timeout, osm_ids=None):
     if provider == "amap":
         longitude, latitude = gcj02(lat, lon)
         query = {"key": key, "location": f"{longitude:.8f},{latitude:.8f}",
-                 "output": "JSON", "extensions": "base", "radius": "1000"}
+                 "output": "JSON", "extensions": "all", "radius": "1000"}
         url, headers = AMAP_URL, {}
     elif provider == "osm":
         query = {"lat": lat, "lon": lon, "format": "jsonv2", "addressdetails": 1, "namedetails": 1, "zoom": 19}
@@ -210,7 +210,11 @@ def nominatim(payload, identity, lat, lon):
     street = mapping(parts.get("streetNumber"))
     province = text(parts.get("province"))
     neighbourhood = text(mapping(parts.get("neighborhood")).get("name"))
-    name = text(mapping(parts.get("building")).get("name")) or neighbourhood or text(street.get("street"))
+    aois, pois = regeo.get("aois"), regeo.get("pois")
+    aoi_name = text(mapping(aois[0]).get("name")) if isinstance(aois, list) and aois else ""
+    poi_name = text(mapping(pois[0]).get("name")) if isinstance(pois, list) and pois else ""
+    name = (aoi_name or poi_name or text(mapping(parts.get("building")).get("name"))
+            or neighbourhood or text(street.get("street")))
     city = text(parts.get("city"))
     if not city and province in {"北京市", "上海市", "天津市", "重庆市"}:
         city = province
