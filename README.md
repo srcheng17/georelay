@@ -147,7 +147,9 @@ These show the upstream TeslaMate interface and dashboards. More examples are in
 
 The project checks for official stable releases every six hours. When a new version appears, automation pins its tag and commit in an update PR, applies the patches, and runs tests and builds on both CPU architectures. Successful builds publish new version tags to GHCR. Both version indexes must pass verification before `latest` is updated. Patch conflicts or failed checks stop publication.
 
-Updates to this repository's `main` branch also build and publish checked images. Version tags include the upstream version and source commit; an update PR records the pin for that build. `latest` follows successful releases, while a version tag or digest lets you choose when to upgrade. The workflow does not merge update PRs or update running services. See the [release guide (Chinese)](docs/AMAP.md#版本跟进与发布) for tag selection and maintenance.
+Image-affecting changes on `main` also build and publish checked images. Documentation, agent instructions, Trellis metadata, and Paseo settings run lightweight checks; other changes run the full dual-architecture checks. Manual validation always runs the full build. Version tags include the upstream version and source commit; `latest` follows verified releases. The workflow does not merge PRs or update running services.
+
+Weekly retention keeps `latest` and the ten newest complete releases, including their architecture manifests. Incomplete or unrecognized records remain for review. Mirror older releases you need to keep pulling. See the [release guide (Chinese)](docs/AMAP.md#版本跟进与发布) for tag selection, cleanup previews, and maintenance.
 
 ## Documentation
 

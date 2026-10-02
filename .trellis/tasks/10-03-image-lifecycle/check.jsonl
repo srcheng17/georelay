@@ -1,0 +1,5 @@
+{"file": ".trellis/spec/backend/index.md", "reason": "Workflow and validation scope"}
+{"file": ".trellis/spec/backend/contracts.md", "reason": "Preserve image/runtime/privacy contracts"}
+{"file": ".trellis/spec/backend/quality-guidelines.md", "reason": "Required verify, checked publication and latest guards"}
+{"file": ".trellis/spec/guides/code-reuse-thinking-guide.md", "reason": "Reuse stdlib/platform patterns"}
+{"file": ".trellis/tasks/10-03-image-lifecycle/research/contracts.md", "reason": "Verified release and testing boundaries"}

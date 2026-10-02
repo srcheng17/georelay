@@ -49,7 +49,7 @@ NOMINATIM_BASE_URL是新增补丁变量，默认官方OSM。只接受HTTP/HTTPS 
 
 ## 6. Tests Required
 
-tests/test_adapter.py 检查转换/原值、永久ID并发/TTL/重启/语言、地域错误边界、50项批量和同来源多身份、慢滴网络硬超时、HTTP状态/隐私、在线备份。tests/test_upstream.py 检查错pin/冲突fail closed；补丁内ExUnit验证默认/自定义URL、pool/proxy、负ID数据库roundtrip及错误不变Unknown。CI构建两个镜像并检查非root健康与许可。
+tests/test_adapter.py 检查转换/原值、永久ID并发/TTL/重启/语言、地域错误边界、50项批量和同来源多身份、慢滴网络硬超时、HTTP状态/隐私、在线备份。tests/test_upstream.py 检查错pin/冲突fail closed；补丁内ExUnit验证默认/自定义URL、pool/proxy、负ID数据库roundtrip及错误不变Unknown。影响镜像的改动及手动验证执行双架构镜像构建、非root健康与许可检查；轻量改动仍须通过Python与verify检查，具体发布/保留契约见quality-guidelines.md。
 
 名称回归用虚构AOI/POI验证优先级与缺失fallback，并由本地HTTP测试实际请求参数确认 `extensions=all`；不能只mock详细响应而漏掉真实请求参数。
 
