@@ -1,85 +1,119 @@
-# TeslaMate 高德地址适配
+# TeslaMate AMap address adapter
 
-为自托管的 [TeslaMate](https://github.com/teslamate-org/teslamate) 增加高德地址解析，让行程和充电记录显示高德提供的地点名称与地址。本仓库维护源码补丁、独立适配器和构建流程。
+English | [简体中文](README.zh-CN.md)
+
+AMap place names and addresses for your self-hosted [TeslaMate](https://github.com/teslamate-org/teslamate) drive and charging records. This repository contains the source patches, a standalone address adapter and the build workflows.
 
 > This project is an unofficial community tool and is not affiliated with, endorsed by, or supported by the official TeslaMate project.
 
-## 高德地址解析
+[Getting started](#getting-started) · [Features](#features) · [Screenshots](#screenshots) · [Updates](#updates) · [Documentation](#documentation)
 
-中国大陆使用高德逆地理编码，境外使用 OpenStreetMap。返回结果包含地点名称以及省市区、道路等地址信息，地区判断与名称处理见[路由说明](docs/AMAP.md#路由与名称)。
+## Getting started
 
-车辆坐标保持 WGS84，仅查询高德时临时转换为 GCJ-02。TeslaMate 继续负责行程、充电记录和地址入库，Grafana、HedgieMate 等客户端沿用原有读取方式。底图选择和地图显示纠偏由客户端负责。
+Run the patched TeslaMate image built from this repository alongside the address adapter. The official TeslaMate image does not support this project's `NOMINATIM_BASE_URL` setting.
 
-## 使用
+1. Build both images using the [source build instructions (Chinese)](docs/AMAP.md#开发与构建).
+2. Configure the adapter with an AMap Web Service API key and a Nominatim User-Agent containing your application name and contact information. The [configuration guide (Chinese)](docs/AMAP.md#配置) includes the adapter Compose example.
+3. Connect both services to the same Docker network and set this variable on the patched TeslaMate service:
 
-需要运行本仓库构建的补丁版 TeslaMate 和高德适配器。官方镜像不支持本项目新增的 `NOMINATIM_BASE_URL`。
+   ```dotenv
+   NOMINATIM_BASE_URL=http://amap-adapter:8080
+   ```
 
-1. 按[源码构建步骤](docs/AMAP.md#开发与构建)生成 TeslaMate 和适配器镜像。
-2. 参照[配置指南](docs/AMAP.md#配置)设置高德 Web 服务 Key 和 OSM 调用者标识，运行适配器。
-3. 将两个服务接入同一个 Docker 网络，通过 `NOMINATIM_BASE_URL` 把 TeslaMate 的地址请求指向适配器。
+Keep the adapter's data volume across restarts and upgrades. It stores persistent address identities as well as cached responses. Read the [backup and existing-address compatibility notes (Chinese)](docs/AMAP.md#永久身份与备份) before replacing an existing setup.
 
-适配器的数据卷需要持久保存，备份方法与旧地址兼容范围见[永久身份与备份](docs/AMAP.md#永久身份与备份)。TeslaMate 的常规安装和使用方式见[官方文档](https://docs.teslamate.org/)。
+## Features
 
-## 官方功能
+Address lookup uses AMap in mainland China and OpenStreetMap elsewhere. Results include place names and address components such as province, city and road. The [routing notes (Chinese)](docs/AMAP.md#路由与名称) explain regional detection and name selection.
 
-TeslaMate 使用 [Elixir](https://elixir-lang.org/) 编写，将车辆数据保存在 PostgreSQL，通过 Grafana 展示和分析数据，并向本地 [MQTT](https://en.wikipedia.org/wiki/MQTT) Broker 发布车辆数据。以下功能介绍与截图来自[官方 README](https://github.com/teslamate-org/teslamate/blob/33d200b2fba9d5138803916a788cef5eae31b1aa/README.md)。
+Coordinates remain WGS84 in storage and responses. The adapter converts them to GCJ-02 only for requests to AMap. TeslaMate continues to manage drive records, charging records and stored addresses.
 
-### 通用功能
+TeslaMate is written in [Elixir](https://elixir-lang.org/), stores vehicle data in PostgreSQL, uses Grafana for visualization and analysis, and publishes vehicle data to a local [MQTT](https://en.wikipedia.org/wiki/MQTT) broker. The features below are from the [upstream README](https://github.com/teslamate-org/teslamate/blob/33d200b2fba9d5138803916a788cef5eae31b1aa/README.md).
 
-- 高精度行程记录。
-- 使车辆尽早进入休眠，避免额外的待机耗电。
-- 自动地址解析和自定义地理围栏。
-- 通过 MQTT 集成 Home Assistant、Node-RED 和 Telegram。
-- 同一 Tesla 账户支持多辆车。
-- 充电费用记录。
-- 从 TeslaFi 和 tesla-apiscraper 导入数据。
-- 浅色、深色及跟随系统的主题模式。
-- Web 界面支持简体中文、繁体中文等 19 种语言，缺失译文回退为英语。
+<details>
+<summary>General features</summary>
 
-### 仪表盘
+- High-precision drive recording.
+- Lets the vehicle sleep as soon as possible to avoid extra standby drain.
+- Automatic address lookup and custom geofences.
+- MQTT integration with Home Assistant, Node-RED and Telegram.
+- Multiple vehicles on one Tesla account.
+- Charging cost tracking.
+- Data import from TeslaFi and tesla-apiscraper.
+- Light, dark and system theme modes.
+- A web interface in 19 languages, including Simplified and Traditional Chinese, with English as the fallback for untranslated text.
 
-点击面板名称可查看官方文档中的说明与截图。
+</details>
 
-| 面板 | 面板 |
-| --- | --- |
-| [电池健康](https://docs.teslamate.org/docs/screenshots/#battery-health) | [电量](https://docs.teslamate.org/docs/screenshots/#charge-level) |
-| [充电记录](https://docs.teslamate.org/docs/screenshots/#charges) | [充电详情](https://docs.teslamate.org/docs/screenshots/#charge-details) |
-| [充电统计](https://docs.teslamate.org/docs/screenshots/#charging-stats) | [数据库信息](https://docs.teslamate.org/docs/screenshots/#database-information) |
-| [行程统计](https://docs.teslamate.org/docs/screenshots/#drive-stats) | [行程记录](https://docs.teslamate.org/docs/screenshots/#drives) |
-| [行程详情](https://docs.teslamate.org/docs/screenshots/#drive-details) | [效率与能耗](https://docs.teslamate.org/docs/screenshots/#efficiency) |
-| [地点与地址](https://docs.teslamate.org/docs/screenshots/#location-addresses) | [里程](https://docs.teslamate.org/docs/screenshots/#mileage) |
-| [概览](https://docs.teslamate.org/docs/screenshots/#overview) | [预计续航与电池衰减](https://docs.teslamate.org/docs/screenshots/#projected-range) |
-| [车辆在线与休眠状态](https://docs.teslamate.org/docs/screenshots/#states) | [综合统计](https://docs.teslamate.org/docs/screenshots/#statistics) |
-| [温度](https://docs.teslamate.org/docs/screenshots/#temperatures) | [时间线](https://docs.teslamate.org/docs/screenshots/#timeline) |
-| [旅程](https://docs.teslamate.org/docs/screenshots/#trip) | [车辆软件更新](https://docs.teslamate.org/docs/screenshots/#updates) |
-| [待机耗电](https://docs.teslamate.org/docs/screenshots/#vampire-drain) | [历史行驶地图](https://docs.teslamate.org/docs/screenshots/#visited-lifetime-driving-map) |
+<details>
+<summary>Built-in dashboards</summary>
 
-### 截图
+Each link opens the official dashboard documentation and sample screenshots.
 
-TeslaMate Web 界面、行程详情和电池健康面板。更多图片见[官方截图文档](https://docs.teslamate.org/docs/screenshots/)。
+- [Battery health](https://docs.teslamate.org/docs/screenshots/#battery-health)
+- [Charge level](https://docs.teslamate.org/docs/screenshots/#charge-level)
+- [Charges](https://docs.teslamate.org/docs/screenshots/#charges)
+- [Charge details](https://docs.teslamate.org/docs/screenshots/#charge-details)
+- [Charging stats](https://docs.teslamate.org/docs/screenshots/#charging-stats)
+- [Database information](https://docs.teslamate.org/docs/screenshots/#database-information)
+- [Drive stats](https://docs.teslamate.org/docs/screenshots/#drive-stats)
+- [Drives](https://docs.teslamate.org/docs/screenshots/#drives)
+- [Drive details](https://docs.teslamate.org/docs/screenshots/#drive-details)
+- [Efficiency](https://docs.teslamate.org/docs/screenshots/#efficiency)
+- [Locations and addresses](https://docs.teslamate.org/docs/screenshots/#location-addresses)
+- [Mileage](https://docs.teslamate.org/docs/screenshots/#mileage)
+- [Overview](https://docs.teslamate.org/docs/screenshots/#overview)
+- [Projected range and battery degradation](https://docs.teslamate.org/docs/screenshots/#projected-range)
+- [Vehicle online and sleep states](https://docs.teslamate.org/docs/screenshots/#states)
+- [Statistics](https://docs.teslamate.org/docs/screenshots/#statistics)
+- [Temperatures](https://docs.teslamate.org/docs/screenshots/#temperatures)
+- [Timeline](https://docs.teslamate.org/docs/screenshots/#timeline)
+- [Trip](https://docs.teslamate.org/docs/screenshots/#trip)
+- [Software update history](https://docs.teslamate.org/docs/screenshots/#updates)
+- [Vampire drain](https://docs.teslamate.org/docs/screenshots/#vampire-drain)
+- [Lifetime driving map](https://docs.teslamate.org/docs/screenshots/#visited-lifetime-driving-map)
 
-![官方 TeslaMate Web 界面](https://raw.githubusercontent.com/teslamate-org/teslamate/33d200b2fba9d5138803916a788cef5eae31b1aa/website/static/screenshots/web_interface.png)
+</details>
 
-![官方 TeslaMate 行程详情仪表盘](https://raw.githubusercontent.com/teslamate-org/teslamate/33d200b2fba9d5138803916a788cef5eae31b1aa/website/static/screenshots/drive.png)
+## Screenshots
 
-![官方 TeslaMate 电池健康仪表盘](https://raw.githubusercontent.com/teslamate-org/teslamate/33d200b2fba9d5138803916a788cef5eae31b1aa/website/static/screenshots/battery-health.png)
+These show the upstream TeslaMate interface and dashboards. More examples are in the [official screenshot documentation](https://docs.teslamate.org/docs/screenshots/).
 
-## 版本维护
+![Upstream TeslaMate web interface](https://raw.githubusercontent.com/teslamate-org/teslamate/33d200b2fba9d5138803916a788cef5eae31b1aa/website/static/screenshots/web_interface.png)
 
-项目跟进官方稳定版，当前构建使用的版本记录在 [upstream.json](upstream.json)。构建时从官方仓库取得该版本的源码，再应用本仓库的补丁。
+<details>
+<summary>Drive details and battery health</summary>
 
-每周定时检查上游新 release。维护者审查变化并更新版本配置与补丁后，CI 自动运行检查并构建 TeslaMate 和适配器镜像；补丁冲突或测试失败会中止构建。镜像发布需要在 `main` 手动触发，工作流不自动部署服务。具体步骤见[版本跟进与发布](docs/AMAP.md#版本跟进与发布)。
+![Upstream TeslaMate drive details dashboard](https://raw.githubusercontent.com/teslamate-org/teslamate/33d200b2fba9d5138803916a788cef5eae31b1aa/website/static/screenshots/drive.png)
 
-## 许可与来源
+![Upstream TeslaMate battery health dashboard](https://raw.githubusercontent.com/teslamate-org/teslamate/33d200b2fba9d5138803916a788cef5eae31b1aa/website/static/screenshots/battery-health.png)
 
-TeslaMate 及本仓库代码采用 AGPL-3.0-or-later。上游 [LICENSE](LICENSE)、[NOTICE](NOTICE) 和 [TRADEMARK.md](TRADEMARK.md) 原样保留，完整许可、版权、附加条款及商标要求以这些文件为准。修改版本的对应源码与重建方式见 [MODIFICATIONS.md](MODIFICATIONS.md)。
+</details>
 
-高德服务与数据受其[服务文档及条款](https://lbs.amap.com/api/webservice/guide/api/georegeo)约束；OpenStreetMap 数据使用 [ODbL 许可](https://www.openstreetmap.org/copyright)。代码许可不替代上游服务或数据许可。
+## Updates
 
-TeslaMate 是独立项目，与 Tesla, Inc. 无隶属、认可或赞助关系；相关商标归其权利人所有。向官方上游贡献时，请遵循[官方贡献说明](https://github.com/teslamate-org/teslamate/blob/33d200b2fba9d5138803916a788cef5eae31b1aa/README.md#license)，包括其 FLA/CLA 要求。
+This project follows stable upstream releases. Builds download the source version recorded in [upstream.json](upstream.json) and apply this repository's patches.
 
-## 致谢
+An automated check reports new releases each week. A maintainer reviews the changes and updates the pinned version and patches. CI then tests and builds both images; patch conflicts or failing tests stop the build.
 
-- TeslaMate 初始作者：[Adrian Kumpf](https://github.com/adriankumpf)。
-- [TeslaMate 官方贡献者](https://github.com/teslamate-org/teslamate/graphs/contributors)。
-- [本仓库修改与维护贡献者](https://github.com/srcheng17/teslamate/graphs/contributors)。
+Publishing requires a manual workflow run on `main`. The workflow does not deploy services. See the [release maintenance guide (Chinese)](docs/AMAP.md#版本跟进与发布) for the process and image tags.
+
+## Documentation
+
+- [AMap adapter guide (Chinese)](docs/AMAP.md): configuration, API, builds and backups.
+- [TeslaMate documentation](https://docs.teslamate.org/): installation and everyday use.
+- [Source and modifications](MODIFICATIONS.md): what this repository changes and how to rebuild it.
+
+## License and source
+
+TeslaMate and the code in this repository are licensed under AGPL-3.0-or-later. The upstream [LICENSE](LICENSE), [NOTICE](NOTICE) and [TRADEMARK.md](TRADEMARK.md) are preserved unchanged. They contain the full license, copyright notices, additional terms and trademark requirements. Source for this modified version and rebuild instructions are documented in [MODIFICATIONS.md](MODIFICATIONS.md).
+
+AMap services and data remain subject to their [documentation and terms](https://lbs.amap.com/api/webservice/guide/api/georegeo). OpenStreetMap data is licensed under [ODbL](https://www.openstreetmap.org/copyright). The code license does not replace those service or data terms.
+
+TeslaMate is an independent project and is not affiliated with, endorsed by, or sponsored by Tesla, Inc. Related trademarks belong to their respective owners. Contributions to the official project must follow its [contribution requirements](https://github.com/teslamate-org/teslamate/blob/33d200b2fba9d5138803916a788cef5eae31b1aa/README.md#license), including its FLA/CLA.
+
+## Credits
+
+- Initial TeslaMate author: [Adrian Kumpf](https://github.com/adriankumpf).
+- [TeslaMate contributors](https://github.com/teslamate-org/teslamate/graphs/contributors).
+- [Contributors to this repository](https://github.com/srcheng17/teslamate/graphs/contributors).

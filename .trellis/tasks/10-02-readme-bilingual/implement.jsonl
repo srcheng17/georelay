@@ -1,0 +1,3 @@
+{"file": ".trellis/spec/backend/quality-guidelines.md", "reason": "公开README内容结构、来源和真实构建流程"}
+{"file": ".trellis/spec/frontend/index.md", "reason": "地址服务产品边界与截图来源"}
+{"file": ".trellis/tasks/10-02-readme-bilingual/research/readme-layout.md", "reason": "高Star项目实际README的语言切换与内容布局参考"}

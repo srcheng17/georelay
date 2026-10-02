@@ -1,6 +1,6 @@
 # 高德地址适配指南
 
-本指南介绍高德地址服务的配置与维护。项目介绍和官方功能见[首页](../README.md)，修改范围见 [MODIFICATIONS.md](../MODIFICATIONS.md)，构建使用的官方版本见 [upstream.json](../upstream.json)。
+本指南介绍高德地址服务的配置与维护。项目介绍和官方功能见[中文首页](../README.zh-CN.md)，修改范围见 [MODIFICATIONS.md](../MODIFICATIONS.md)，构建使用的官方版本见 [upstream.json](../upstream.json)。
 
 ## 架构与范围
 
@@ -13,7 +13,7 @@
 
 补丁同时修改 Geocoder 的 BaseUrl 和专用 Finch pool，保留 pool size=3 与 proxy 配置。未配置自定义 URL 时，TeslaMate 仍使用官方 OSM。Sidecar 无需 Tesla token、ENCRYPTION_KEY 或生产 PostgreSQL 权限。
 
-适配器改变地址文字来源；原 PostgreSQL 继续由 TeslaMate 管理，客户端继续读取原数据。HedgieMate/Grafana 的底图、地图显示纠偏和刷新频率由客户端决定。数据库、轨迹、SQLite 和适配器响应均保留原始 **WGS84**；仅发给高德的查询临时转换为 **GCJ-02**。
+适配器改变地址文字来源，原 PostgreSQL 继续由 TeslaMate 管理。数据库、轨迹、SQLite 和适配器响应均保留原始 **WGS84**；仅发给高德的查询临时转换为 **GCJ-02**。
 
 TeslaMate 在行程结束解析起终点、充电开始解析地址，启动及定时任务补修缺失地址，语言切换通过 lookup 刷新地址；普通 GPS 点不会逐点逆向解析。
 
