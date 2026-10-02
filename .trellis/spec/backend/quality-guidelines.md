@@ -8,7 +8,7 @@
 
 固定 `upstream.json` 中稳定 tag 和解引用 commit，下载到临时/忽略目录；先校验 commit 再 `git apply --check`，任何失败停止。保留上游 LICENSE/NOTICE。GitHub release 检测自动创建仅 pin 变更的上游分支与 PR，并显式触发双架构构建；影响镜像的 main push 或受控上游分支 dispatch 通过全部校验后自动发布版本镜像。仅文档、agent/Paseo/Trellis 设置改动运行轻量检查，手动 dispatch 始终完整构建。上游分支必须与 main 相比仅改 upstream.json，并匹配稳定 tag；不自动合并 PR。两架构都检查成功才从已测试产物发布索引，保留单名 verify 汇总检查，不得绕过测试。不自动部署、不自动提升 stable、不 force push。
 
-共享prepare路径在应用补丁前逐字核对LICENSE/NOTICE/TRADEMARK.md与仓库复核原文；缺失或变化停止，人工复核后更新随附文件。修改通知含相关日期并进入两个镜像，发布检查验证可读。GeoRelay是独立公开名称，镜像为georelay和georelay-adapter，保留旧包但不向其发布新版本；上游命名/图标变化需重新审查品牌补丁，不能静默跳过。修改版保留内部模块、数据库和MQTT兼容标识，不借重构改动数据契约。
+共享prepare路径在应用补丁前逐字核对LICENSE/NOTICE/TRADEMARK.md与仓库复核原文；缺失或变化停止，人工复核后更新随附文件。修改通知含相关日期并进入两个镜像，发布检查验证可读。GeoRelay是独立公开名称，镜像为georelay和georelay-adapter，保留旧包但不向其发布新版本；公开应用名/图标变化需维护受测品牌范围，不能静默跳过。修改版保留内部脚本、模块、数据库和MQTT兼容标识，不对它们做名称禁用扫描，不借重构改动数据契约。
 
 用户已授权维护两镜像的 `latest`。所有发布任务共用 publish job concurrency group；先验证两个版本索引，再复制已测试索引至 latest，不重新构建。推广前回读官方最新稳定版和源码状态，旧 pin 或过期源码跳过推广，网络/校验失败停止；GitHub 队列不保证 FIFO，不能仅凭串行认为版本不会倒退。每个 latest 必须回读为对应版本的同一双架构内容。两个 package 没有原子更新，任一推广或回读失败使 workflow 失败，不能报告双镜像完成。保留固定版本/digest用法；latest本身不会拉取或重建运行容器。
 
@@ -80,3 +80,45 @@ README 按使用者需要组织用途、功能和使用入口，验收数字、P
 错误：workflow 级 paths-ignore 跳过必需检查；正确：workflow 总触发，只跳过 Docker job，verify 判定有意跳过。
 
 错误：保留 latest 索引却按时间删除它引用的子镜像；正确：先计算所有保留索引的依赖，再删除整组历史。
+
+
+## 上游品牌准备契约
+
+### 1. Scope / Trigger
+
+适用于 `scripts/prepare_upstream.py`、品牌补丁及 gettext/静态资源随上游版本变化的兼容检查。
+
+### 2. Signatures
+
+入口仍为 `python3 scripts/prepare_upstream.py DESTINATION`；本地和 CI 使用相同准备路径，不新增配置或依赖。
+
+### 3. Contracts
+
+- 保持 tag/commit、补丁严格应用、法律原文逐字审核先于修改。
+- 从品牌 patch 移除 gettext diff。按解码后的完整语义 msgid 选择当前四条名称文案（加密提醒、signin API key、import discard、car empty-list），仅改该条目 msgid/msgstr 中的品牌。组合多行 quoted continuations 后匹配，按物理 LF 分割而非 splitlines()，避免将译文内 U+2028/U+0085 当成换行；保留占位符、其他消息、评论、flags、上下文、技术标识、署名和免责声明。新增用户可见品牌文案须显式维护映射和测试。
+- 删除已知上游品牌资源时允许它已不存在；生成中性 favicon。新增非视觉文件不阻止准备，未知新增视觉资源继续人工复核。不得冻结整个 static 目录文件集合。
+- 公开标题、导航名称、免责声明/法律署名、source 链接和图标用实际渲染/资源测试验证，不依赖某种具体 HTML 源码标签写法，也不禁止源码内任意 TeslaMate 提及。
+
+### 4. Validation & Error Matrix
+
+| 条件 | 行为 |
+| --- | --- |
+| 无关内部名称、非视觉文件增加、旧品牌图标缺失 | 保留无关文件、生成中性图标、正常准备 |
+| 已知 UI 消息换行或翻译更新 | 按完整语义 key 转换所选条目 |
+| 未知新增视觉资源 | 修改前停止，人工品牌复核 |
+| 法律原文缺失/变化、tag 移动、补丁冲突 | 保持原有失败门禁 |
+| 所选 UI 消息出现不能安全处理的 PO 结构 | 明确失败，不能破坏其他条目 |
+
+### 5. Good / Base / Bad Cases
+
+- Base：准备固定 release，保留内部 TeslaMate 模块和完整法律署名，用户界面显示 GeoRelay。
+- Good：非视觉静态文件新增，或译文把品牌拆成两个 quoted fragments，仍正常准备。
+- Bad：对所有源文件全文替换 TeslaMate，误改模块/法律声明；或仅因 robots.txt 外多一个中性文本文件阻止发布。
+
+### 6. Tests Required
+
+现有 Python 真实 Git fixture 验证无关条目原文保留、多行品牌转换、旧图标缺失、非视觉文件增加和未知视觉资源失败；法律/pin/补丁失败回归保持。现有 ExUnit 检查实际配置语言中的共享布局和四条 gettext 文案，保留图标/法律来源渲染断言。当前有限页面用例不能证明未来每个新增页面的品牌均已处理。
+
+### 7. Wrong vs Correct
+
+错误：全目录文件集合相等 + 任意 TeslaMate 词扫描。正确：已知 UI 消息受控转换、未知视觉资源复核、公开结果行为测试，内部技术标识保持兼容。

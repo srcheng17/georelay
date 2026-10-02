@@ -2,6 +2,7 @@
 """Fetch an exact stable release and fail closed before applying local patches."""
 
 import argparse
+import ast
 import json
 from pathlib import Path
 import re
@@ -17,6 +18,17 @@ BRANDED_ASSETS = (
     "android-chrome-192x192.png", "android-chrome-512x512.png",
     "mstile-150x150.png", "safari-pinned-tab.svg", "browserconfig.xml", "site.webmanifest",
 )
+VISUAL_EXTENSIONS = {
+    ".svg", ".svgz", ".ico", ".png", ".apng", ".jpg", ".jpeg", ".gif",
+    ".webp", ".avif", ".bmp", ".tif", ".tiff", ".heic", ".heif",
+}
+# ponytail: four reviewed UI keys; extend this set when public brand copy changes.
+BRAND_MESSAGES = {
+    "To ensure that your <strong>Tesla API tokens are stored securely</strong>, an encryption key must be provided to TeslaMate via the <code>ENCRYPTION_KEY</code> environment variable. Otherwise, a <strong>login will be required after every restart</strong>.",
+    "You are using the API key (%{token}) provided by %{url}. It will allow your TeslaMate to access the official Tesla Fleet API and Tesla Telemetry streaming.",
+    "Discard this interrupted import? Its completed-file checkpoints and rejection report will no longer be used. Imported TeslaMate data is kept.",
+    "No vehicle was found when TeslaMate started. Once your vehicle shows up in the Tesla app, reload the vehicle list.",
+}
 DISCLAIMER = (
     "This project is an unofficial community tool and is not affiliated with, endorsed by, "
     "or supported by the official TeslaMate project."
@@ -56,34 +68,59 @@ def check_legal_files(directory):
 
 def check_branding_assets(directory):
     static = Path(directory) / "elixir/priv/static"
-    actual = {p.relative_to(static).as_posix() for p in static.rglob("*") if p.is_file()}
-    if actual != set(BRANDED_ASSETS) | {"robots.txt"}:
-        raise ValueError("upstream static assets changed; manual branding review required")
+    unknown = {
+        p.relative_to(static).as_posix() for p in static.rglob("*")
+        if p.is_file() and p.suffix.lower() in VISUAL_EXTENSIONS
+    } - set(BRANDED_ASSETS)
+    if unknown:
+        raise ValueError("upstream visual assets changed; manual branding review required")
+
+
+def brand_catalog(path):
+    text = path.read_bytes().decode("utf-8")
+    fields = list(re.finditer(
+        r'^[ \t]*(msgid(?:_plural)?|msgstr(?:\[\d+\])?)[ \t]+'
+        r'("(?:[^"\\\r\n]|\\.)*"(?:\r?\n[ \t]*"(?:[^"\\\r\n]|\\.)*")*)',
+        text, re.MULTILINE,
+    ))
+    messages = BRAND_MESSAGES | {m.replace("TeslaMate", "GeoRelay") for m in BRAND_MESSAGES}
+    changes = []
+    for index, field in enumerate(fields):
+        if field[1] != "msgid":
+            continue
+        message = "".join(ast.literal_eval(line.strip()) for line in field[2].split("\n"))
+        if message not in messages:
+            continue
+        translations = []
+        for following in fields[index + 1:]:
+            if following[1] == "msgid":
+                break
+            translations.append(following)
+        if [f[1] for f in translations] != ["msgstr"]:
+            raise ValueError("known branding message is not singular; manual branding review required")
+        for selected in (field, translations[0]):
+            value = "".join(ast.literal_eval(line.strip()) for line in selected[2].split("\n"))
+            renamed = value.replace("TeslaMate", "GeoRelay")
+            if renamed != value:
+                changes.append((
+                    selected.start(), selected.end(),
+                    selected[1] + " " + json.dumps(renamed, ensure_ascii=False),
+                ))
+    for start, end, replacement in reversed(changes):
+        text = text[:start] + replacement + text[end:]
+    if changes:
+        path.write_bytes(text.encode("utf-8"))
 
 
 def stage_branding(directory):
     directory = Path(directory)
-    layout = (directory / "elixir/lib/teslamate_web/templates/layout/root.html.heex").read_text()
-    if not all(value in layout for value in (
-        'suffix=" · GeoRelay"', '>GeoRelay</strong>',
-        "https://github.com/srcheng17/georelay", DISCLAIMER,
-    )):
-        raise ValueError("independent application branding is missing; manual review required")
-    for relative in ("elixir/lib/teslamate_web", "elixir/priv/gettext"):
-        for path in (directory / relative).rglob("*"):
-            if path.suffix not in (".heex", ".eex", ".po", ".pot"):
-                continue
-            text = path.read_text()
-            if path.suffix in (".po", ".pot"):
-                text = "\n".join(line for line in text.splitlines() if not line.startswith("#"))
-            for credit in (DISCLAIMER, "© the TeslaMate contributors", "Upstream TeslaMate: "):
-                text = text.replace(credit, "")
-            text = text.replace(":teslamate,", "")
-            if re.search(r"(?<![\w/.-])TeslaMate(?![\w.-])", text, re.IGNORECASE):
-                raise ValueError("unreviewed application branding in " + str(path.relative_to(directory)))
+    for path in (directory / "elixir/priv/gettext").rglob("*"):
+        if path.suffix in (".po", ".pot"):
+            brand_catalog(path)
     static = directory / "elixir/priv/static"
+    static.mkdir(parents=True, exist_ok=True)
     for name in BRANDED_ASSETS:
-        (static / name).unlink()
+        (static / name).unlink(missing_ok=True)
     (static / "favicon.svg").write_bytes((ROOT / "branding/favicon.svg").read_bytes())
 
 
