@@ -12,19 +12,21 @@
 
 往现有 TeslaMate stack 添加 `amap-adapter`，并将 TeslaMate 换成本项目的补丁镜像。两个镜像都支持 `linux/amd64` 和 `linux/arm64`。官方镜像不支持 `NOMINATIM_BASE_URL`。
 
-从 [TeslaMate 镜像](https://github.com/users/srcheng17/packages/container/package/teslamate-amap)和[适配器镜像](https://github.com/users/srcheng17/packages/container/package/teslamate-amap-adapter)页面选择相同的已发布版本。在现有 stack 的 `.env` 中设置 `TESLAMATE_AMAP_VERSION`、`AMAP_KEY` 和 `NOMINATIM_USER_AGENT`，格式参考 [.env.example](.env.example)。默认大陆使用高德 Web 服务，境外使用 OSM；User-Agent 需包含应用名和实际联系方式。大陆改用百度时，设置 `MAINLAND_PROVIDER=baidu`、`BAIDU_AK` 及其对应的 `BAIDU_SK`。
+下面的片段默认使用已发布的 `latest` 镜像。需要固定版本时，从 [TeslaMate 镜像](https://github.com/users/srcheng17/packages/container/package/teslamate-amap)和[适配器镜像](https://github.com/users/srcheng17/packages/container/package/teslamate-amap-adapter)页面选择相同版本，设置为 `TESLAMATE_AMAP_VERSION`。
+
+在现有 stack 的 `.env` 中设置 `AMAP_KEY` 和 `NOMINATIM_USER_AGENT`，格式参考 [.env.example](.env.example)。默认大陆使用高德 Web 服务，境外使用 OSM；User-Agent 需包含应用名和实际联系方式。大陆改用百度时，设置 `MAINLAND_PROVIDER=baidu`、`BAIDU_AK` 及其对应的 `BAIDU_SK`。
 
 把下面的片段并入已有 Compose 配置，保留其他 TeslaMate 环境变量、数据库、MQTT、Grafana 服务以及原有卷。
 
 ```yaml
 services:
   teslamate:
-    image: ghcr.io/srcheng17/teslamate-amap:${TESLAMATE_AMAP_VERSION:?Set TESLAMATE_AMAP_VERSION in .env}
+    image: ghcr.io/srcheng17/teslamate-amap:${TESLAMATE_AMAP_VERSION:-latest}
     environment:
       NOMINATIM_BASE_URL: http://amap-adapter:8080
       # Keep your other TeslaMate settings here.
   amap-adapter:
-    image: ghcr.io/srcheng17/teslamate-amap-adapter:${TESLAMATE_AMAP_VERSION:?Set TESLAMATE_AMAP_VERSION in .env}
+    image: ghcr.io/srcheng17/teslamate-amap-adapter:${TESLAMATE_AMAP_VERSION:-latest}
     restart: unless-stopped
     environment:
       GEOCODER_PROVIDER: "${GEOCODER_PROVIDER:-auto}"
@@ -50,6 +52,13 @@ volumes:
 Compose 默认网络可以让两个服务互通。如果 TeslaMate 使用自定义网络，把适配器加入同一网络，并保留访问地址服务的外网出口。适配器无需映射主机端口。
 
 重启和升级时保留 `amap-data`，其中存有永久地址身份和响应缓存。替换现有环境前，请阅读[备份与旧地址兼容说明](docs/AMAP.md#永久身份与备份)。其他选项见[配置指南](docs/AMAP.md#配置)。
+
+发布新的 `latest` 不会更新运行中的容器。需要升级时，先备份 TeslaMate 数据库和适配器数据，再在 stack 目录执行：
+
+```sh
+docker compose pull teslamate amap-adapter
+docker compose up -d teslamate amap-adapter
+```
 
 <details>
 <summary>从源码构建镜像</summary>
@@ -136,9 +145,9 @@ TeslaMate 使用 [Elixir](https://elixir-lang.org/) 编写，将车辆数据保�
 
 ## 版本维护
 
-项目每六小时检查官方稳定 release。发现新版本后，自动在更新 PR 中固定 tag 和 commit，应用补丁，在两个 CPU 架构上运行测试与构建。全部通过后发布新的 GHCR 版本镜像；补丁冲突或检查失败会停止发布。
+项目每六小时检查官方稳定 release。发现新版本后，自动在更新 PR 中固定 tag 和 commit，应用补丁，在两个 CPU 架构上运行测试与构建。全部通过后发布新的 GHCR 版本镜像，两个版本索引验证通过后再更新 `latest`；补丁冲突或检查失败会停止发布。
 
-本仓库 `main` 的更新也会构建并发布已检查镜像。每个标签包含上游版本和源码 commit，更新 PR 保留该次构建的版本配置。工作流不自动合并更新 PR，也不更新正在运行的服务。版本选择与维护见[版本跟进与发布](docs/AMAP.md#版本跟进与发布)。
+本仓库 `main` 的更新也会构建并发布已检查镜像。版本标签包含上游版本和源码 commit，更新 PR 保留该次构建的版本配置。`latest` 跟随成功发布的版本；固定版本标签或 digest 可自行控制升级时机。工作流不自动合并更新 PR，也不更新正在运行的服务。版本选择与维护见[版本跟进与发布](docs/AMAP.md#版本跟进与发布)。
 
 ## 文档
 

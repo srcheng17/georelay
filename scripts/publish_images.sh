@@ -69,8 +69,9 @@ done
 version="$tag-amap-$GITHUB_SHA"
 repository="ghcr.io/$(printf '%s' "$GITHUB_REPOSITORY" | tr '[:upper:]' '[:lower:]')"
 export IMAGE_VERSION="$version" IMAGE_SOURCE="https://github.com/$GITHUB_REPOSITORY"
+manifest_dir=$(mktemp -d)
+trap 'docker logout ghcr.io >/dev/null 2>&1 || true; rm -rf "$manifest_dir"' EXIT
 printf '%s' "$GHCR_TOKEN" | docker login ghcr.io -u "$GITHUB_ACTOR" --password-stdin >/dev/null
-trap 'docker logout ghcr.io >/dev/null 2>&1 || true' EXIT
 for architecture in amd64 arm64; do
   docker load -i "$artifacts/checked-images-$architecture.tar"
   # Both archives use :checked: push this architecture before the next load replaces it.
@@ -92,15 +93,83 @@ for key, value in {"source": os.environ["IMAGE_SOURCE"], "revision": os.environ[
     docker push "$package:$version-$architecture"
   done
 done
-for package in "$repository-amap" "$repository-amap-adapter"; do
-  docker buildx imagetools create --tag "$package:$version" "$package:$version-amd64" "$package:$version-arm64"
-  docker buildx imagetools inspect --raw "$package:$version" | python3 -c '
-import json, sys
-index = json.load(sys.stdin)
+
+index_digest() {
+  python3 - "$1" <<'PY'
+import json, re, sys
+with open(sys.argv[1]) as metadata:
+    digest = json.load(metadata)["containerimage.descriptor"]["digest"]
+assert re.fullmatch(r"sha256:[0-9a-f]{64}", digest), "invalid published index digest"
+print(digest)
+PY
+}
+verify_index() {
+  python3 - "$1" "$2" <<'PY'
+import hashlib, json, sys
+from pathlib import Path
+raw = Path(sys.argv[1]).read_bytes()
+index = json.loads(raw)
 platforms = [(entry["platform"]["os"], entry["platform"]["architecture"]) for entry in index["manifests"]]
 assert sorted(platforms) == [("linux", "amd64"), ("linux", "arm64")], "index must contain exactly amd64 and arm64"
-'
+# Buildx versions may append a display newline to the raw registry bytes.
+copies = [raw, raw[:-1]] if raw.endswith(b"\n") else [raw]
+assert sys.argv[2] in {"sha256:" + hashlib.sha256(data).hexdigest() for data in copies}, "index differs from the checked version digest"
+PY
+}
+for package in "$repository-amap" "$repository-amap-adapter"; do
+  metadata="$manifest_dir/${package##*/}.metadata.json"
+  raw_index="$manifest_dir/${package##*/}.json"
+  docker buildx imagetools create --metadata-file "$metadata" --tag "$package:$version" "$package:$version-amd64" "$package:$version-arm64"
+  docker buildx imagetools inspect --raw "$package:$version" > "$raw_index"
+  verify_index "$raw_index" "$(index_digest "$metadata")"
 done
 if [[ -n ${GITHUB_STEP_SUMMARY:-} ]]; then
   printf 'Published checked linux/amd64 and linux/arm64 images:\n\n- `%s-amap:%s`\n- `%s-amap-adapter:%s`\n\nNo deployment performed.\n' "$repository" "$version" "$repository" "$version" >> "$GITHUB_STEP_SUMMARY"
+fi
+
+# Publication jobs are serialized; still recheck freshness after uploading both indexes.
+release_status=$(GITHUB_TOKEN="$GHCR_TOKEN" python3 - "$root" <<'PY'
+from pathlib import Path
+import sys
+sys.path.insert(0, str(Path(sys.argv[1]) / "scripts"))
+from check_release import check_release, github_json
+from prepare_upstream import load_pin
+try:
+    print(check_release(load_pin(Path("upstream.json")), fetch=github_json)["status"])
+except (OSError, ValueError, KeyError, TypeError, AttributeError):
+    raise SystemExit("Latest promotion failed: official stable release could not be verified")
+PY
+)
+git fetch --quiet --atomic --no-tags origin "+refs/heads/main:refs/remotes/origin/main" "+$GITHUB_REF:refs/remotes/origin/publication-source"
+main_sha=$(git rev-parse origin/main)
+source_sha=$(git rev-parse origin/publication-source)
+source_parent=$(git show -s --format=%P HEAD)
+skip_reason=
+if [[ $release_status == update_available ]]; then
+  skip_reason="a newer official stable release exists"
+elif [[ $release_status != current ]]; then
+  echo "Latest promotion failed: unexpected official release status" >&2
+  exit 1
+elif [[ $source_sha != "$GITHUB_SHA" ]]; then
+  skip_reason="the publication source branch has changed"
+elif [[ $GITHUB_REF != refs/heads/main && $source_parent != "$main_sha" ]]; then
+  skip_reason="the automatic release branch no longer has current main as its parent"
+fi
+if [[ -n $skip_reason ]]; then
+  echo "Version images published; latest promotion skipped because $skip_reason."
+  if [[ -n ${GITHUB_STEP_SUMMARY:-} ]]; then
+    printf '\nLatest promotion skipped: %s.\n' "$skip_reason" >> "$GITHUB_STEP_SUMMARY"
+  fi
+  exit 0
+fi
+for package in "$repository-amap" "$repository-amap-adapter"; do
+  digest=$(index_digest "$manifest_dir/${package##*/}.metadata.json")
+  # A single index source is copied unchanged; no rebuild or manifest recomposition.
+  docker buildx imagetools create --prefer-index=false --tag "$package:latest" "$package@$digest"
+  raw_index="$manifest_dir/${package##*/}.latest.json"
+  docker buildx imagetools inspect --raw "$package:latest" > "$raw_index"
+  verify_index "$raw_index" "$digest"
+done
+if [[ -n ${GITHUB_STEP_SUMMARY:-} ]]; then
+  printf '\nBoth latest tags verified against the checked version indexes.\n' >> "$GITHUB_STEP_SUMMARY"
 fi

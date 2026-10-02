@@ -116,9 +116,10 @@ def update_release(repository, pin, source, api=github, run=command, detect=chec
                 "Official stable release: " + report["release_url"] + "\n\n"
                 "Pinned official commit: `" + proposed["commit"] + "`.\n"
                 "Source main commit: `" + source + "`. This PR changes only `upstream.json`.\n\n"
-                "CI is explicitly dispatched to test the patches and both architectures, then publish versioned images. "
+                "CI is explicitly dispatched to test the patches and both architectures, then publish versioned images "
+                "and promote latest after both version indexes pass verification and source freshness checks. "
                 "A conflict or failed check stops publication. This workflow does not merge the PR, change patches, "
-                "promote latest/stable, or deploy services."
+                "or deploy services."
             ),
         })
     if (
@@ -157,7 +158,7 @@ def update_release(repository, pin, source, api=github, run=command, detect=chec
     report.update({
         "status": "already_started" if started else "dispatched",
         "branch": branch, "source_main": source, "source_commit": revision, "pull_request": pull["html_url"],
-        "next_step": "CI tests both architectures before publishing version images. No automatic merge or deployment.",
+        "next_step": "CI tests both architectures before publishing versions and promoting latest from current sources. No automatic merge or deployment.",
     })
     return report
 

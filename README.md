@@ -12,19 +12,21 @@ AMap, Baidu Maps and OpenStreetMap address lookup for your self-hosted [TeslaMat
 
 Add `amap-adapter` to your existing TeslaMate stack and use the patched TeslaMate image. Both images support `linux/amd64` and `linux/arm64`. The official TeslaMate image does not support `NOMINATIM_BASE_URL`.
 
-Choose the same published version for both images from the [TeslaMate image](https://github.com/users/srcheng17/packages/container/package/teslamate-amap) and [adapter image](https://github.com/users/srcheng17/packages/container/package/teslamate-amap-adapter) pages. Set `TESLAMATE_AMAP_VERSION`, `AMAP_KEY` and `NOMINATIM_USER_AGENT` in your stack's `.env`; see [.env.example](.env.example). The default uses AMap Web Services in mainland China and OSM elsewhere. The User-Agent must include your application name and contact information. To use Baidu instead, set `MAINLAND_PROVIDER=baidu`, `BAIDU_AK` and the matching `BAIDU_SK`.
+The fragment below uses the published `latest` images by default. To pin a release, set `TESLAMATE_AMAP_VERSION` to the same version from the [TeslaMate image](https://github.com/users/srcheng17/packages/container/package/teslamate-amap) and [adapter image](https://github.com/users/srcheng17/packages/container/package/teslamate-amap-adapter) pages.
+
+Set `AMAP_KEY` and `NOMINATIM_USER_AGENT` in your stack's `.env`; see [.env.example](.env.example). The default uses AMap Web Services in mainland China and OSM elsewhere. The User-Agent must include your application name and contact information. To use Baidu instead, set `MAINLAND_PROVIDER=baidu`, `BAIDU_AK` and the matching `BAIDU_SK`.
 
 Merge this fragment into your existing Compose configuration. Keep your other TeslaMate environment variables, database, MQTT and Grafana services, and existing volumes.
 
 ```yaml
 services:
   teslamate:
-    image: ghcr.io/srcheng17/teslamate-amap:${TESLAMATE_AMAP_VERSION:?Set TESLAMATE_AMAP_VERSION in .env}
+    image: ghcr.io/srcheng17/teslamate-amap:${TESLAMATE_AMAP_VERSION:-latest}
     environment:
       NOMINATIM_BASE_URL: http://amap-adapter:8080
       # Keep your other TeslaMate settings here.
   amap-adapter:
-    image: ghcr.io/srcheng17/teslamate-amap-adapter:${TESLAMATE_AMAP_VERSION:?Set TESLAMATE_AMAP_VERSION in .env}
+    image: ghcr.io/srcheng17/teslamate-amap-adapter:${TESLAMATE_AMAP_VERSION:-latest}
     restart: unless-stopped
     environment:
       GEOCODER_PROVIDER: "${GEOCODER_PROVIDER:-auto}"
@@ -50,6 +52,13 @@ volumes:
 Compose's default network lets the two services reach each other. If TeslaMate uses a custom network, add the adapter to that network and keep outbound access to the address services. The adapter does not need a host port.
 
 Keep `amap-data` across restarts and upgrades: it stores persistent address identities as well as cached responses. Read the [backup and existing-address compatibility notes (Chinese)](docs/AMAP.md#永久身份与备份) before replacing an existing setup. Additional settings are in the [configuration guide (Chinese)](docs/AMAP.md#配置).
+
+Publishing a new `latest` does not update running containers. To update, back up your TeslaMate database and adapter data, then run these commands from your stack directory:
+
+```sh
+docker compose pull teslamate amap-adapter
+docker compose up -d teslamate amap-adapter
+```
 
 <details>
 <summary>Build the images from source</summary>
@@ -136,9 +145,9 @@ These show the upstream TeslaMate interface and dashboards. More examples are in
 
 ## Updates
 
-The project checks for official stable releases every six hours. When a new version appears, automation pins its tag and commit in an update PR, applies the patches, and runs tests and builds on both CPU architectures. Successful builds publish new version tags to GHCR. Patch conflicts or failed checks stop publication.
+The project checks for official stable releases every six hours. When a new version appears, automation pins its tag and commit in an update PR, applies the patches, and runs tests and builds on both CPU architectures. Successful builds publish new version tags to GHCR. Both version indexes must pass verification before `latest` is updated. Patch conflicts or failed checks stop publication.
 
-Updates to this repository's `main` branch also build and publish checked images. Each image tag includes the upstream version and source commit; an update PR records the pin for that build. The workflow does not merge update PRs or update running services. See the [release guide (Chinese)](docs/AMAP.md#版本跟进与发布) for tag selection and maintenance.
+Updates to this repository's `main` branch also build and publish checked images. Version tags include the upstream version and source commit; an update PR records the pin for that build. `latest` follows successful releases, while a version tag or digest lets you choose when to upgrade. The workflow does not merge update PRs or update running services. See the [release guide (Chinese)](docs/AMAP.md#版本跟进与发布) for tag selection and maintenance.
 
 ## Documentation
 
