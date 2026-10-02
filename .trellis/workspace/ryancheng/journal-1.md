@@ -267,20 +267,6 @@ PR #1 已正常合并；main CI 37029960665 两架构及发布成功，两个 GH
 - 运行中的TeslaMate服务保持原状；生产升级和历史地址迁移另行安排。
 
 
-## Session 10: Optimize image build and retention lifecycle
-<!-- trellis-session: v=2 fp=b61ef1b66200d403 -->
-
-**Date**: 2026-10-03
-**Task**: Optimize image build and retention lifecycle
-**Branch**: `feat/image-lifecycle`
-
-### Summary
-
-Added metadata-only CI gating with required verify and dual-architecture validation preserved. Added preview-first paired GHCR retention for latest and ten complete releases. Full-scope review and 78 tests passed; native CI will be verified on the open PR. No live deletion, deployment or merge.
-
-### Main Changes
-
-- CI gating and conservative grouped GHCR retention with offline regression coverage
 ## Session 9: latest 双镜像发布验收
 <!-- trellis-session: v=2 fp=33fa07c448fecb2b -->
 
@@ -300,11 +286,6 @@ PR #2 正常合并，main CI 37034259606 双架构、verify、publish全部成�
 
 | Hash | Message |
 |------|---------|
-| `b9e524c9f44b46578bd9c8e05002a823e992d8ac` | ci(release): optimize image builds and retention |
-
-### Testing
-
-- [OK] 78 Python tests, actionlint, compilation, shell syntax, whitespace and documentation links passed
 | `38d9bad` | ci: promote verified multiarch images to latest |
 | `faefae6` | docs: record verified latest image release |
 
@@ -318,8 +299,76 @@ PR #2 正常合并，main CI 37034259606 双架构、verify、publish全部成�
 
 ### Next Steps
 
-- Inspect native PR checks; await explicit user instruction before merging
 - Paseo PR合并后自动归档曾中断会话，已只读确认原因；不修改生产服务。
+
+
+## Session 10: Optimize image build and retention lifecycle
+<!-- trellis-session: v=2 fp=b61ef1b66200d403 -->
+
+**Date**: 2026-10-03
+**Task**: Optimize image build and retention lifecycle
+**Branch**: `feat/image-lifecycle`
+
+### Summary
+
+Added metadata-only CI gating with required verify and dual-architecture validation preserved. Added preview-first paired GHCR retention for latest and ten complete releases. Full-scope review and 78 tests passed; native CI will be verified on the open PR. No live deletion, deployment or merge.
+
+### Main Changes
+
+- CI gating and conservative grouped GHCR retention with offline regression coverage
+
+### Git Commits
+
+| Hash | Message |
+|------|---------|
+| `b9e524c9f44b46578bd9c8e05002a823e992d8ac` | ci(release): optimize image builds and retention |
+
+### Testing
+
+- [OK] 78 Python tests, actionlint, compilation, shell syntax, whitespace and documentation links passed
+
+### Status
+
+[OK] **Completed**
+
+### Next Steps
+
+- Inspect native PR checks; await explicit user instruction before merging
+
+
+## Session 11: GeoRelay 架构优化与首次公开发布
+<!-- trellis-session: v=2 fp=0dbf8527a3f780ff -->
+
+**Date**: 2026-10-03
+**Task**: GeoRelay 架构优化与首次公开发布
+**Branch**: `feat/amap-adapter`
+
+### Summary
+
+已落实独立架构评审的身份刷新、批量预算、字段持久化与法律文件守卫；采用用户确认的 GeoRelay 名称。PR #3 获明确授权后正常合并；main 源码 3e6cbfac755f8811b6de76dbba069a702e1ca82a 的双架构、verify 和 publish 全部通过。两个新包 Public，latest 与固定版本索引一致，四次实际匿名拉取及许可文件逐字核验通过，临时资源清理完成。上游 updater 37045300237 成功且报告 current。未部署生产。
+
+### Main Changes
+
+- 更新双语 README 的公开镜像说明，保留原安装命令与旧包兼容段落。
+
+### Git Commits
+
+| Hash | Message |
+|------|---------|
+| `48a298b` | feat(georelay): harden address refresh and rename published artifacts |
+| `16276f3` | docs(release): record verified GeoRelay image publication |
+
+### Testing
+
+- [OK] PR 68 Python、175 ExUnit 与双架构通过；main 发布 37043924235、四次匿名拉取与法律文件验证成功；updater 37045300237 current。
+
+### Status
+
+[OK] **Completed**
+
+### Next Steps
+
+- 首次发布收尾文档在现有任务分支提交并创建独立 PR，等待用户审阅，不自动合并。生产升级和历史迁移保持独立授权。
 
 
 ## Session 12: Verify GeoRelay image lifecycle integration

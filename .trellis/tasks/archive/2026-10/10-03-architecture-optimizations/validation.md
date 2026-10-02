@@ -19,10 +19,14 @@
 - adapter linux/arm64 Docker构建通过，非root UID10001可读0444许可/修改通知；source与Docker label回读正确。完整主应用双架构镜像交由PR CI检验。
 - 独立最终check无未解决发现。发现的settings检查遗漏与两项旧品牌断言已补齐。
 
-## 等待最后回读
+## 远端构建与发布
 
-- 更新PR #3并核实准确提交的双架构build和verify。
+- PR #3提交22b2e82648e741bfcefa5f6a32b2802b3655985a通过[37042779977](https://github.com/srcheng17/georelay/actions/runs/37042779977)：两个原生架构均完成68项Python、175项ExUnit、adapter及应用镜像构建和健康检查，verify成功。PR事件按设计不发布。
+- 用户明确授权后，PR #3于2026-10-02T17:54:53Z合并；main发布源码3e6cbfac755f8811b6de76dbba069a702e1ca82a。其[37043924235](https://github.com/srcheng17/georelay/actions/runs/37043924235)的amd64/arm64、verify、publish全部成功。
+- 发布版本：v4.3.0-georelay-3e6cbfac755f8811b6de76dbba069a702e1ca82a。两个package网页均回读Public，匿名registry核验每个版本索引仅含linux/amd64和linux/arm64，且各自latest逐字匹配其版本索引。
+- georelay索引：sha256:4995d7e183ff5172d71f0b54e2c2757c68ae5df75264a062cb21c6e49e16f5a0；georelay-adapter索引：sha256:7e21879b0038737f3cfb6ada21b7b6cb6ced7c25f9ed4b0076ac2432556870b2。
+- 使用临时空Docker配置实际匿名拉取两镜像的两个平台，共四次；每个子digest的OS/架构、source、revision、version和非root运行用户正确。仅创建未启动的隔离检查容器读取文件，许可/修改通知与审阅源码逐字一致。临时容器、镜像引用和认证配置已清理，未挂载生产卷。
 
 ## 发布与生产边界
 
-main新增AGENTS.md和paseo.json要求用户明确批准合并当前PR/分支。PR保持开放，不开启auto-merge；GeoRelay新包未发布，不声称已匿名拉取。批准合并后由main CI发布，再设置新package public并验证匿名双架构拉取、标签/索引/许可。旧镜像不删除。未修改生产容器、数据库、Dockhand或车辆数据，未执行历史迁移。
+main的AGENTS.md和paseo.json要求用户明确批准合并当前PR/分支。PR #3已获独立授权并正常合并，未绕过保护或开启auto-merge。两个新package已公开发布并完成匿名验证；旧镜像保留。首次发布说明与本记录的收尾文档PR保持开放，合并授权不延用于该PR。未修改生产容器、数据库、Dockhand或车辆数据，未执行历史迁移。

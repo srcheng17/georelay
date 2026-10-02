@@ -12,9 +12,7 @@
 
 往现有 TeslaMate stack 添加 `georelay-adapter`，并将 TeslaMate 换成本项目的补丁镜像。两个镜像都支持 `linux/amd64` 和 `linux/arm64`。官方镜像不支持 `NOMINATIM_BASE_URL`。
 
-本次改动合并且首次 publish 成功后，GeoRelay 新镜像名称才可用。在此之前，请使用下方源码构建方式；早期镜像包保留原名称。
-
-发布后，下面的片段默认使用 `latest` 镜像。需要固定版本时，从[应用镜像](https://github.com/users/srcheng17/packages/container/package/georelay)和[适配器镜像](https://github.com/users/srcheng17/packages/container/package/georelay-adapter)页面选择相同版本，设置为 `GEORELAY_VERSION`。
+GeoRelay 镜像已在 GHCR 公开发布，下面的片段默认使用 `latest` 镜像。需要固定版本时，从[应用镜像](https://github.com/users/srcheng17/packages/container/package/georelay)和[适配器镜像](https://github.com/users/srcheng17/packages/container/package/georelay-adapter)页面选择相同版本，设置为 `GEORELAY_VERSION`。
 
 在现有 stack 的 `.env` 中设置 `AMAP_KEY` 和 `NOMINATIM_USER_AGENT`，格式参考 [.env.example](.env.example)。默认大陆使用高德 Web 服务，境外使用 OSM；User-Agent 需包含应用名和实际联系方式。大陆改用百度时，设置 `MAINLAND_PROVIDER=baidu`、`BAIDU_AK` 及其对应的 `BAIDU_SK`。
 
