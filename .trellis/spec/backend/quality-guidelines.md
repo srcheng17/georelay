@@ -164,7 +164,7 @@ Base：同仓PR完整双架构验证后只生成beta。Good：当前候选经可
 
 ### 6. Tests Required
 
-标准库 fixtures覆盖source SHA/channel、fork/dispatch、stable/beta/latest隔离、同artifact发布、registry digest/OCI、成功/陈旧/保护拒绝、merge读回/dispatch不确定、beta无产物与closed main失败。镜像内 slow-drip HTTP 回归的总预算包括 Python 启动/import；模拟滴流时长须长于有界预算，保留请求确实到达、504 与总时限断言，禁止以删断言或重跑套件掩盖时序失败。Bark真实loopback验证POST、dry-run零网络、响应/重试/脱敏。主镜像实际启动和adapter packaged suite单独留证，云端两native job及真实Bark未取得时明确待验证。
+标准库 fixtures覆盖source SHA/channel、fork/dispatch、stable/beta/latest隔离、同artifact发布、registry digest/OCI、成功/陈旧/保护拒绝、merge读回/dispatch不确定、beta无产物与closed main失败；保护读取后head变化时必须由expected-SHA merge拒绝，断言单次merge、PR未合并、零dispatch及merge失败通知。镜像内 slow-drip HTTP 回归的总预算包括 Python 启动/import；模拟滴流时长须长于有界预算，保留请求确实到达、504 与总时限断言，禁止以删断言或重跑套件掩盖时序失败。Bark真实loopback验证POST、dry-run零网络、响应/重试/脱敏。主镜像实际启动和adapter packaged suite单独留证，云端两native job及真实Bark未取得时明确待验证。
 
 ### 7. Wrong vs Correct
 

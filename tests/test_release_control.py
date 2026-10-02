@@ -45,6 +45,7 @@ class Fixture:
         self.calls, self.fetches = [], []
         self.documents = {}
         self.fail, self.merge_result, self.changed_on_last_read = None, True, False
+        self.changed_after_protection_read = False
         self.pull_reads = 0
         self.images()
 
@@ -88,6 +89,8 @@ class Fixture:
             return {"type": "file", "encoding": "base64", "content": base64.b64encode(json.dumps(pin).encode()).decode()}
         if path == "graphql":
             self.assert_graphql_read(payload)
+            if self.changed_after_protection_read:
+                self.pull["head"]["sha"] = "d" * 40
             return {"data": {"repository": {"ref": {"branchProtectionRule": copy.deepcopy(self.protection)}}}}
         if path == "/git/ref/heads/main":
             return {"object": {"type": "commit", "sha": MAIN}}
@@ -96,6 +99,8 @@ class Fixture:
         if path == "/compare/" + MAIN + "..." + HEAD:
             return copy.deepcopy(self.comparison)
         if method == "PUT" and path == "/pulls/7/merge":
+            if payload["sha"] != self.pull["head"]["sha"]:
+                raise RuntimeError("Expected head mismatch")
             if self.merge_result:
                 self.pull.update(state="closed", merged=True, merge_commit_sha=MERGED)
             if self.fail == "lost_merge_response":
@@ -231,6 +236,21 @@ class ReleaseControlTests(unittest.TestCase):
             self.assertTrue(result["notify"])
             self.assertEqual(fixture.writes(), [])
             self.assertNotIn("private-remote-response", json.dumps(result))
+
+    def test_head_change_after_protection_read_rejected_by_expected_head_merge(self):
+        fixture = Fixture()
+        fixture.changed_after_protection_read = True
+        result = fixture.control()
+        self.assertEqual(fixture.writes(), [("PUT", "/pulls/7/merge", {"sha": HEAD, "merge_method": "merge"})])
+        self.assertEqual(fixture.pull["head"]["sha"], "d" * 40)
+        self.assertEqual(fixture.pull["state"], "open")
+        self.assertFalse(fixture.pull["merged"])
+        self.assertIsNone(fixture.pull["merge_commit_sha"])
+        self.assertEqual(result["status"], "failed")
+        self.assertEqual(result["reason"], "merge")
+        self.assertTrue(result["notify"])
+        self.assertEqual(result["notification"]["stage"], "merge")
+        self.assertNotIn("merged_sha", result)
 
     def test_rejected_merge_no_dispatch_uncertain_merge_reads_back_without_retry(self):
         for fail in ("/pulls/7/merge", None):

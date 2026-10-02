@@ -18,8 +18,8 @@
     }
   },
   "pr": "https://github.com/srcheng17/georelay/pull/10",
-  "beta_run": 37070822103,
-  "main_run": null,
+  "beta_run": 37071951401,
+  "main_run": 37072746968,
   "beta_runs": [
     {
       "id": 37068534907,
@@ -66,6 +66,23 @@
       "verify": "failure",
       "publish": "skipped",
       "cause": "test fixture assumed interpreter startup and adapter import complete within 300ms; deadline correctly returned 504 and wall-clock bound passed"
+    },
+    {
+      "id": 37071951401,
+      "head": "4dce3a817fd0608fe7e9e3b271e4cd4562dd0ed6",
+      "conclusion": "success",
+      "build-amd64": {
+        "startup": "success",
+        "migrations": 105,
+        "adapter_tests": 34
+      },
+      "build-arm64": {
+        "startup": "success",
+        "migrations": 105,
+        "adapter_tests": 34
+      },
+      "verify": "success",
+      "publish": "success"
     }
   ],
   "linux_fixture_fix": {
@@ -79,9 +96,13 @@
     "oversized_ascii_and_unicode_regressions": "preserved and passed"
   },
   "beta_registry": {
-    "both_indexes": "exact amd64/arm64 with valid OCI revision/version/digests",
-    "beta-pr-10": "matches checked version",
-    "latest": "unchanged from before beta"
+    "both_indexes": "exact amd64/arm64 with verified child/config digests and OCI source/revision/version",
+    "version": "v4.3.0-georelay-beta-4dce3a817fd0608fe7e9e3b271e4cd4562dd0ed6",
+    "georelay": "sha256:0d924df9d14c3f852fc92e028f15d6814a8f6f305983491b02edc8cd64c594ec",
+    "georelay-adapter": "sha256:71594e209dbbcfd15739f22b3ab9cba225be84ee4521579268b829af61fe97cc",
+    "beta-pr-10": "exact version digests",
+    "latest": "unchanged from before beta",
+    "control_dry_run": "candidate_ready; no mutations"
   },
   "bark_secret": {
     "name": "BARK_URL",
@@ -102,5 +123,17 @@
     "linux_arm64_before": "controlled 0.4s startup delay reproduces empty HTTP requests; original 504/wall bound pass and child exited",
     "linux_arm64_after": "same delay: real HTTP, 504, wall bound and child SIGKILL verified; elapsed 2.138s",
     "linux_arm64_packaged_suite": "34/34 in 13.522s; no external network; imported /app/adapter/server.py; container removed"
+  },
+  "bootstrap_merge": {
+    "pr": 10,
+    "head": "4dce3a817fd0608fe7e9e3b271e4cd4562dd0ed6",
+    "merge_sha": "5727c65a9eda47869bfea1b79679e6899ce829a5",
+    "method": "normal merge with expected head; explicit user authorization; no admin bypass"
+  },
+  "bark_failure_test": {
+    "branch": "qa/georelay-bark-failure-37071951401",
+    "sha": "3a52ad71d39e59525e760867ca7075a985c6e7a5",
+    "run": 37072800085,
+    "status": "in_progress; intentionally reproduces original Linux fixture failure before images are built"
   }
 }

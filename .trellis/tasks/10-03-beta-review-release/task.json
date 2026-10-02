@@ -15,14 +15,14 @@
   "branch": "feat/beta-review-release",
   "base_branch": "main",
   "worktree_path": null,
-  "commit": "27d7ebf",
-  "pr_url": null,
+  "commit": "4dce3a8",
+  "pr_url": "https://github.com/srcheng17/georelay/pull/10",
   "subtasks": [],
   "children": [
     "10-03-main-image-smoke"
   ],
   "parent": null,
   "relatedFiles": [],
-  "notes": "2026-10-03 用户开始批准实施，范围仅GHCR。本地实现完成，完整131/131、实际arm64主应用105迁移/login/legal/compiled address及故障/取消清理、adapter34/34通过，Trellis全域审查通过。用户已回复行确认3.4计划，本次执行单个本地提交；云端双架构/Actions token保护merge dispatch/真实Bark待验收，BARK_URL缺失。未push/创建PR或外部写入，bootstrap需用户明确审阅合并。 用户最新明确授权“合并，验证”；已整合main c8a6e83地址-only改动，当前执行本次PR云端双架构+beta检查通过后合并与main正式GHCR/latest验证；不更新运行容器。",
+  "notes": "用户明确授权合并验证，本次范围仅 GHCR。PR10 head4dce3a8 云端 amd64/arm64 主应用真实 HTTP200、105迁移、核心表和编译地址通过，adapter各34/34，verify/publish成功；beta双索引/OCI/alias通过且latest未变，control只读candidate_ready。已普通expected-head merge为5727c65；main正式run37072746968进行中。BARK_URL已安全配置，临时failure分支run37072800085与同任务late-head回归候选用于真实通知/默认Actions自动合并dispatch验收；不更新运行容器，不绕过保护。",
   "meta": {}
 }
