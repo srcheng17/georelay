@@ -1,0 +1,43 @@
+{
+  "id": "address-only-upstream",
+  "name": "address-only-upstream",
+  "title": "Restrict upstream integration to address patches",
+  "description": "进一步收窄当前分支：只保留地址补丁和构建兼容性校验，不改写或审核上游名称、UI、静态资源和法律文本；GeoRelay 项目及镜像名保持。",
+  "status": "in_progress",
+  "dev_type": null,
+  "scope": "backend",
+  "package": null,
+  "priority": "P2",
+  "creator": "ryancheng",
+  "assignee": "ryancheng",
+  "createdAt": "2026-10-03",
+  "completedAt": null,
+  "branch": "enhanced-hedgehog",
+  "base_branch": "main",
+  "worktree_path": null,
+  "commit": null,
+  "pr_url": null,
+  "subtasks": [],
+  "children": [],
+  "parent": null,
+  "relatedFiles": [
+    "scripts/prepare_upstream.py",
+    "scripts/test_upstream.sh",
+    "tests/test_upstream.py",
+    "patches/0003-georelay-branding.patch",
+    "branding/favicon.svg",
+    ".github/workflows/ci.yml",
+    "README.md",
+    "README.zh-CN.md",
+    "MODIFICATIONS.md",
+    "docs/AMAP.md",
+    ".trellis/spec/backend/index.md",
+    ".trellis/spec/backend/contracts.md",
+    ".trellis/spec/backend/quality-guidelines.md",
+    ".trellis/spec/frontend/index.md"
+  ],
+  "notes": "进一步收窄先前同分支品牌优化；本地87 Python和130隔离地址ExUnit通过，当前head云端双架构是合并门禁。",
+  "meta": {
+    "user_approval": "用户已确认本分支优化并授权 push合并，最新指令进一步收窄同一改动的实现范围。"
+  }
+}

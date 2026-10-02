@@ -150,13 +150,13 @@ Each link opens the official dashboard documentation and sample screenshots.
 
 ## Screenshots
 
-GeoRelay uses its own name and removes the upstream logos. The interface and dashboard features come from the upstream application; its [screenshot documentation](https://docs.teslamate.org/docs/screenshots/) shows those features under the upstream branding.
+GeoRelay is the repository and image name. The application keeps the upstream TeslaMate interface, name and icons; its [screenshot documentation](https://docs.teslamate.org/docs/screenshots/) shows these features.
 
 ## Updates
 
-The project checks for official stable releases every six hours. When a new version appears, automation pins its tag and commit in an update PR, checks the upstream legal files, applies the patches, and runs tests and builds on both CPU architectures. Successful builds publish new version tags to GHCR. Both version indexes must pass verification before `latest` is updated. Changes to LICENSE, NOTICE or TRADEMARK.md require manual review; patch conflicts or failed checks stop publication.
+The project checks for official stable releases every six hours. When a new version appears, automation pins its tag and commit in an update PR, applies the address patches, and runs tests and builds on both CPU architectures. Successful builds publish new version tags to GHCR. Both version indexes must pass verification before `latest` is updated. Upstream names, translations, static assets and legal text are left unchanged and are not compared with repository snapshots. Patch conflicts or failed address tests and builds stop publication.
 
-Image-affecting changes on `main` also build and publish checked images. README files, guides, agent instructions, Trellis metadata, and Paseo settings run lightweight checks; other changes, including image legal files and modification notices, run the full dual-architecture checks. Manual validation always runs the full build. Version tags include the upstream version and source commit; `latest` follows verified releases. The workflow does not merge PRs or update running services.
+Image-affecting changes on `main` also build and publish checked images. README files, guides, agent instructions, Trellis metadata, and Paseo settings run lightweight checks; runtime, patch, build and unrecognized changes run the full dual-architecture checks. Manual validation always runs the full build. Version tags include the upstream version and source commit; `latest` follows verified releases. The workflow does not merge PRs or update running services.
 
 Weekly retention keeps `latest` and the ten newest complete releases, including their architecture manifests. Incomplete or unrecognized records remain for review. Mirror older releases you need to keep pulling. See the [release guide (Chinese)](docs/AMAP.md#版本跟进与发布) for tag selection, cleanup previews, and maintenance.
 

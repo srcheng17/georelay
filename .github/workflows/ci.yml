@@ -85,7 +85,6 @@ jobs:
             uid=$(docker run --rm --entrypoint id "$image:checked" -u)
             [[ $uid =~ ^[1-9][0-9]*$ ]] || exit 1
           done
-          docker run --rm --entrypoint /bin/sh georelay:checked -c 'test -r /usr/share/doc/teslamate/LICENSE && test -s /usr/share/doc/teslamate/NOTICE && test -s /usr/share/doc/teslamate/TRADEMARK.md && test -s /usr/share/doc/teslamate/MODIFICATIONS.md'
           docker run --rm --entrypoint /bin/sh georelay-adapter:checked -c 'test -r /usr/share/doc/georelay-adapter/LICENSE && test -s /usr/share/doc/georelay-adapter/MODIFICATIONS.md'
       - name: Adapter container health without a key or host port
         run: |
