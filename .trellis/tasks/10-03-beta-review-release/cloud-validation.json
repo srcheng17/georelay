@@ -1,0 +1,23 @@
+{
+  "integration_base": "c8a6e837d32a8757043fa4d2a5f6abd876a64bb3",
+  "merge_authorized": true,
+  "latest_before_beta": {
+    "georelay": {
+      "digest": "sha256:01938ac18e399761abd5d2663d9a9c1e05db704b18c84590bf0196599a86c588",
+      "platforms": [
+        "linux/amd64",
+        "linux/arm64"
+      ]
+    },
+    "georelay-adapter": {
+      "digest": "sha256:a8a7318d397df1bddb75d4fe6396adae9af32c1a724f4e2b934668c3b98ac2a2",
+      "platforms": [
+        "linux/amd64",
+        "linux/arm64"
+      ]
+    }
+  },
+  "pr": null,
+  "beta_run": null,
+  "main_run": null
+}

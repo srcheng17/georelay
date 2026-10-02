@@ -5,7 +5,7 @@
 ## 架构与范围
 
 ```text
-固定官方源码 + 地址刷新与 GeoRelay 品牌补丁
+固定官方源码 + 地址 URL 与刷新补丁
   → 私有 Docker 网络中的 adapter
     → 高德 regeo / 百度逆地理编码 / 官方 Nominatim
     → 独立 SQLite 永久身份与响应缓存
@@ -147,7 +147,9 @@ docker build -t georelay-adapter:local adapter
 bash scripts/test_main_image.sh georelay:local georelay-adapter:local
 ```
 
-`prepare_upstream.py` 的目标目录必须不存在或为空。脚本核实 tag 解引用后的 commit，逐字核对上游法律文件，再严格应用全部补丁；任何一步失败立即停止。
+`prepare_upstream.py` 的目标目录必须不存在或为空。脚本核实 tag 解引用后的 commit，再严格应用两个地址补丁并检查空白；任何一步失败立即停止。
+
+准备只修改地址集成需要的 HTTP、Locations 和 Geocoder 生产源码及对应测试。上游页面、名称、翻译、图标、法律文件和 Dockerfile 保持原样；这些内容变化或缺失不会触发本项目的额外审核门禁。应用仍显示 TeslaMate，仓库与镜像名为 GeoRelay。
 
 上游检查脚本创建独立 Elixir/PostgreSQL 容器、随机网络和临时存储，无 host port，退出时清理。它执行官方编译、格式检查、原 Geocoder/HTTP 测试，以及新增 URL 配置和负数 signed bigint 数据库兼容测试。
 
@@ -183,8 +185,8 @@ sidecar 的缓存 TTL 不会自动更新 PostgreSQL 里的已有地址。应用�
 自动流程只发布 GHCR 镜像，不更新运行容器。
 
 1. [Check upstream release](../.github/workflows/upstream-release.yml) 每六小时检查官方稳定 release，也可在 main 手动触发。GitHub 定时调度可能延迟。
-2. 新版本创建 upstream/tag 分支与 PR，只修改 upstream.json。草稿、预发布、降级或移动 tag 停止处理；法律原文变化仍需人工复核，不跳过严格功能补丁。
-3. [Validate and build](../.github/workflows/ci.yml) 检出实际 PR head commit，原生 amd64/arm64 分别运行源码检查、共享 prepare/ExUnit、镜像架构/用户/许可检查，以及最终镜像内 adapter suite 和应用启动/迁移/许可/地址闭环。无需账号或真实地图 Key，使用独立临时资源。
+2. 新版本创建 upstream/tag 分支与 PR，只修改 upstream.json。草稿、预发布、降级或移动 tag 停止处理；共享 prepare 只应用严格地址补丁；不重写或比对上游 UI、翻译、图标与法律文本，不追加 Dockerfile 指令。
+3. [Validate and build](../.github/workflows/ci.yml) 检出实际 PR head commit，原生 amd64/arm64 分别运行源码检查、共享 prepare/地址 ExUnit、镜像架构/用户与 adapter 许可检查，以及最终镜像内 adapter suite 和应用启动/迁移/地址闭环。应用保留上游 TeslaMate 界面，HTTP 就绪以实际登录表单为准。无需账号或真实地图 Key，使用独立临时资源。
 4. 两架构通过后，复用相同已测试产物发布两个 package 的 beta 版本并验证索引；当前 PR 可更新 beta-pr-N，不能改写 latest。
 5. [Beta release control](../.github/workflows/beta-control.yml) 从可信 main 读取 run、PR 与 registry 元数据。两架构/verify/beta 索引成功，PR 同仓且 open/non-draft、head 仍为 tested SHA、main 基线有效且服务器保护允许时，带 expected head SHA 普通 merge。fork、过期或被新提交替代的成功候选只跳过；控制器不执行候选脚本、不自动重写分支、不合并自身首次启用 PR。
 6. 合并回读成功后显式 dispatch main，绑定 expected_main_sha 与 source_pr；GITHUB_TOKEN 合并的 push 本身不会触发新 CI。main 对 merge commit 重新构建/测试，发布正式版本与 latest；推广前回读 current main。main 的镜像相关 push 或 main publish dispatch 也可正式发布，latest 跟随已审阅 main pin，无需等待尚未合入的新官方版本。
@@ -225,7 +227,7 @@ docker compose up -d teslamate georelay-adapter
 
 ### 构建触发与镜像保留
 
-普通分支 push 不增加重复构建；同仓 PR 更新触发 beta CI，未开 PR 的分支可手动 publish dispatch。fork 只验证，不持发布/Bark 写凭据。main push 只有镜像相关变更才完整构建和发布；README/docs/agent/Trellis/Paseo 元数据走轻量 Python/空白检查，required verify 仍出现。运行/未知路径、补丁、pin、测试、发布流程、法律文件或 MODIFICATIONS.md 完整构建；删除/重命名计入。dispatch 始终完整构建，publish 默认关闭。
+普通分支 push 不增加重复构建；同仓 PR 更新触发 beta CI，未开 PR 的分支可手动 publish dispatch。fork 只验证，不持发布/Bark 写凭据。main push 只有镜像相关变更才完整构建和发布；README/docs/agent/Trellis/Paseo 元数据走轻量 Python/空白检查，required verify 仍出现。运行/未知路径、补丁、pin、测试及发布流程完整构建；删除/重命名计入。dispatch 始终完整构建，publish 默认关闭。
 
 [镜像保留工作流](../.github/workflows/image-retention.yml) 每周 main 清理，手动默认预览。正式两个 package 都有正确双架构镜像/索引才算完整组，保留最近 10 组、latest 及其引用；按组而非 version 记录数排序。beta 不占正式额度，当前作为未知标签受保护；beta 历史会增长，自动清理延期。
 
@@ -239,6 +241,6 @@ python3 scripts/retain_images.py --repository srcheng17/georelay
 
 ## 来源与许可
 
-官方 [TeslaMate](https://github.com/teslamate-org/teslamate) 的 [LICENSE](../LICENSE)、[NOTICE](../NOTICE)、[TRADEMARK.md](../TRADEMARK.md) 原样保留；代码按 AGPL-3.0-or-later 提供，修改说明见 [MODIFICATIONS.md](../MODIFICATIONS.md)。两个镜像保留各自代码许可，官方镜像构建继续保留其 NOTICE。
+官方 [TeslaMate](https://github.com/teslamate-org/teslamate) 的 [LICENSE](../LICENSE)、[NOTICE](../NOTICE)、[TRADEMARK.md](../TRADEMARK.md) 原样保留；代码按 AGPL-3.0-or-later 提供，修改说明见 [MODIFICATIONS.md](../MODIFICATIONS.md)。准备脚本保留上游原生文件和 Dockerfile；应用镜像中的许可文件按该版本官方 Dockerfile 打包。适配器镜像保留自身代码许可与修改说明。
 
 [高德逆地理编码文档](https://lbs.amap.com/api/webservice/guide/api/georegeo)、[百度逆地理编码文档](https://lbs.baidu.com/faq/api?title=webapi/guide/webservice-geocoding-abroad-base)、[Nominatim 使用政策](https://operations.osmfoundation.org/policies/nominatim/)与 [OpenStreetMap 数据许可](https://www.openstreetmap.org/copyright)分别约束对应服务和数据。

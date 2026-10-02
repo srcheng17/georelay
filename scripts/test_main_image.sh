@@ -58,7 +58,7 @@ cleanup() {
   fi
   rm -f "$command_output"
   if (( result == 0 )); then
-    echo "Main image smoke passed: /sign_in HTTP 200, login HTML verified; migrations=$migration_count; core tables present; /notice and /license verified; compiled address checks passed"
+    echo "Main image smoke passed: /sign_in HTTP 200, login HTML verified; migrations=$migration_count; core tables present; compiled address checks passed"
   fi
   exit "$result"
 }
@@ -110,26 +110,14 @@ from urllib.request import Request, urlopen
 url = "http://app:4000/sign_in"
 try:
     with urlopen(Request(url, headers={"Accept": "text/html", "Accept-Language": "en"}), timeout=2) as response:
-        body = response.read(262145).decode("utf-8")
-        valid = (response.status == 200 and response.geturl() == url
-                 and response.headers.get_content_type() == "text/html"
-                 and len(body) <= 262144 and "GeoRelay" in body
-                 and all(marker in body for marker in (
-                     "id=\"tokens\"", "phx-submit=\"sign_in\"",
-                     "name=\"tokens[access]\"", "name=\"tokens[refresh]\"")))
-        if not valid:
+        body = response.read(262145)
+        html = body.decode("utf-8")
+        if not (response.status == 200 and response.geturl() == url
+                and response.headers.get_content_type() == "text/html"
+                and len(body) <= 262144 and all(marker in html for marker in (
+                    "id=\"tokens\"", "phx-submit=\"sign_in\"",
+                    "name=\"tokens[access]\"", "name=\"tokens[refresh]\""))):
             sys.exit(2)
-    for path, markers in (
-        ("notice", ("Copyright", "the TeslaMate contributors", "SPDX-License-Identifier: AGPL-3.0-or-later")),
-        ("license", ("GNU AFFERO GENERAL PUBLIC LICENSE", "Version 3, 19 November 2007")),
-    ):
-        legal_url = "http://app:4000/" + path
-        with urlopen(Request(legal_url, headers={"Accept": "text/html"}), timeout=2) as response:
-            body = response.read(262145).decode("utf-8")
-            if not (response.status == 200 and response.geturl() == legal_url
-                    and response.headers.get_content_type() == "text/plain"
-                    and len(body) <= 262144 and all(marker in body for marker in markers)):
-                sys.exit(2)
     with urlopen("http://stub:8080/health", timeout=2) as response:
         if response.status != 200 or response.read(64) != b"{\"ok\": true}":
             sys.exit(2)
@@ -148,7 +136,7 @@ while (( SECONDS < deadline )); do
     break
   else
     status=$?
-    [[ $status == 1 ]] || fail "HTTP login/legal response or fixture probe execution invalid"
+    [[ $status == 1 ]] || fail "HTTP login response or fixture probe execution invalid"
   fi
   sleep 1
 done

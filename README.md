@@ -150,11 +150,11 @@ Each link opens the official dashboard documentation and sample screenshots.
 
 ## Screenshots
 
-GeoRelay uses its own name and removes the upstream logos. The interface and dashboard features come from the upstream application; its [screenshot documentation](https://docs.teslamate.org/docs/screenshots/) shows those features under the upstream branding.
+GeoRelay is the repository and image name. The application keeps the upstream TeslaMate interface, name and icons; its [screenshot documentation](https://docs.teslamate.org/docs/screenshots/) shows these features.
 
 ## Updates
 
-The project checks official stable releases every six hours and creates a PR with a pinned tag and commit. Same-repository PRs and controlled branch publications produce beta images after native amd64/arm64 tests, including the packaged adapter suite and the application's startup, migrations and address contract. Beta images do not update `latest`. Changes to the upstream legal text require manual review; patch conflicts and failed checks stop publication.
+The project checks official stable releases every six hours and creates a PR with a pinned tag and commit. Same-repository PRs and controlled branch publications produce beta images after native amd64/arm64 tests, including the packaged adapter suite and the application's startup, migrations and address contract. Beta images do not update `latest`. Upstream names, translations, assets, legal text and Dockerfile stay unchanged; preparation only applies the address patches. Patch conflicts and failed checks stop publication.
 
 The release controller merges a successful beta candidate only while its tested PR commit and main baseline remain current and branch protection allows it. It then explicitly starts a main build to publish the formal version and `latest`. Main image-affecting changes also publish checked images; README files, guides, agent instructions, Trellis metadata and Paseo settings use lightweight checks. Successful, metadata-only and check-only runs send no notification; image build, test, merge or publication failures send Bark when the repository's `BARK_URL` Actions Secret is configured. The controller must first be reviewed and merged into main before this automation takes effect.
 

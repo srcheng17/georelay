@@ -1,0 +1,6 @@
+{"file": ".trellis/spec/backend/index.md", "reason": "共享上游准备/patch 边界"}
+{"file": ".trellis/spec/backend/contracts.md", "reason": "地址身份和数据契约保持"}
+{"file": ".trellis/spec/backend/quality-guidelines.md", "reason": "固定 pin、法律复核、双架构和发布边界"}
+{"file": ".trellis/spec/frontend/index.md", "reason": "公开品牌与兼容内部标识"}
+{"file": ".trellis/spec/guides/code-reuse-thinking-guide.md", "reason": "复用共享路径和已有测试"}
+{"file": ".trellis/tasks/10-03-upstream-branding-coupling/research/branding.md", "reason": "品牌敏感点与语义 gettext 转换依据"}

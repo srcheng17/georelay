@@ -27,7 +27,7 @@
 ## 验收标准
 
 - AC1（R1/R2）：分支只生成 beta，main 生成正式版本/latest；fork、轻量、失败或不要求发布的 dispatch 不改写 latest，版本/OCI revision 对应 tested commit。
-- AC2（R3/R4）：两个原生架构复用启动门禁并跑镜像内 adapter suite；GeoRelay 登录/许可页面可用，新库真实迁移；地址刷新保持 ID/坐标/历史关联，模拟失败不造 Unknown 或损坏数据，资源清理有实证。
+- AC2（R3/R4）：两个原生架构复用启动门禁并跑镜像内 adapter suite；实际登录表单页面可用，新库真实迁移；地址刷新保持 ID/坐标/历史关联，模拟失败不造 Unknown 或损坏数据，资源清理有实证。
 - AC3（R3/R7）：缺架构、检查失败、错误 OCI 来源/版本或索引回读失败阻止候选成功；保存和发布同一已测试产物。
 - AC4（R5/R6）：成功且 current head/base 的可信候选只合并一次，回读合并成功后 dispatch；fork、draft、过期/关闭 PR、旧 base、verify skipped/neutral 均零 merge。测试失败没有产物也通知；main 发布失败在 PR 已合并时仍关联 source_pr/expected_main_sha 通知；Bark gating、脱敏、dry-run/模拟接收有回归，真实 delivery 依赖 Secret。
 - AC5（R1/R7）：publisher/updater/轻量/保留回归通过，beta 不挤占十组正式版；README 中英文、发布指南和 executable spec 一致。
@@ -39,3 +39,5 @@
 - 不为 fork 发布/合并，不新增 beta 自动清理；beta 暂由现有保留逻辑保护，历史会增长。
 - BARK_URL 尚未配置，配置与可达性是实际 Bark 验收依赖，规划与离线验证可继续。两个 package 无原子推广，任何一方失败不得报告双镜像完成。
 - 父任务已由 planning 转 in_progress，实施批准与部署范围已明确。主镜像子任务现有代码/证据保持，不回滚或重写；品牌解耦由 enhanced-hedgehog 负责，继续使用共享 prepare 路径，不引入目录全等或任意 TeslaMate 词扫描。
+
+2026-10-03最终整合：用户明确回复“合并，验证”，已授权本次bootstrap分支/PR合入并验证GHCR。整合main c8a6e83（PR9）地址-only修改，保留共享prepare、两个地址补丁与原生Dockerfile；删除品牌词/法律端点额外门禁，以真实登录表单、迁移和compiled地址RPC验收。旧品牌镜像测试记录仅为历史结果；最终以本次云端运行结果为准。

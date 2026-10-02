@@ -1,4 +1,6 @@
-# Beta 发布链路最终本地验证
+# Beta 发布链路验证记录
+
+最新状态：用户已明确授权“合并，验证”。main c8a6e83（PR9）已整合，保留地址-only共享prepare与原Dockerfile；启动门禁已移除品牌/法律端点检查。整合后的完整130/130通过（85.830秒），Trellis复核通过。下面旧arm64三补丁/品牌镜像结果仅为历史验证；本次最终镜像以新PR云端native amd64/arm64结果为准，不能复用旧镜像声明整合启动成功。云端结果将记录在cloud-validation.json。
 
 日期：2026-10-03。分支 `feat/beta-review-release`，本地基线 `da6cc08`。用户已批准实施和未来条件合并；本次 bootstrap PR 仍须明确审阅合并。本地验证结束时尚未提交；未push、创建 PR、调用真实 merge/dispatch、发布镜像、发送真实 Bark 或操作运行服务。
 

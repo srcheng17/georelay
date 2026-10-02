@@ -1,6 +1,6 @@
 # 构建后镜像测试研究
 
-状态：上游运行契约研究；主应用启动部分现已由 main-image-smoke 实现并本地实证，adapter 镜像 suite/许可端点/RPC 地址闭环尚待实施。下表记录补齐启动门禁之前的历史基线。2026-10-03 只读核查 `upstream.json` 固定的官方 commit `33d200b2fba9d5138803916a788cef5eae31b1aa`（v4.3.0）。
+状态：上游运行契约研究；主应用启动部分现已由 main-image-smoke 实现并本地实证，adapter 镜像 suite/RPC 地址闭环已实现；法律/品牌门禁按后续main地址-only决定删除。下表记录补齐启动门禁之前的历史基线。2026-10-03 只读核查 `upstream.json` 固定的官方 commit `33d200b2fba9d5138803916a788cef5eae31b1aa`（v4.3.0）。
 
 ## 现有检查与缺口
 
@@ -39,7 +39,7 @@ docker run --rm --network none \
 - [entrypoint.sh](https://github.com/teslamate-org/teslamate/blob/33d200b2fba9d5138803916a788cef5eae31b1aa/entrypoint.sh)：先 `bin/teslamate eval "TeslaMate.Release.wait_for_database_and_migrate()"`，再执行 CMD。数据库等待无上游时间上限，测试必须自己设置有界等待。
 - [runtime.exs](https://github.com/teslamate-org/teslamate/blob/33d200b2fba9d5138803916a788cef5eae31b1aa/elixir/config/runtime.exs)：运行时需 `DATABASE_HOST`、`DATABASE_USER`、`DATABASE_PASS`、`DATABASE_NAME`；可设置 `DISABLE_MQTT=true`、`HTTP_BINDING_ADDRESS=0.0.0.0`、`ENCRYPTION_KEY`。使用明确的 CI 虚构 encryption key，避免启动生成并打印随机 key。
 - 补丁设置 `NOMINATIM_BASE_URL=http://stub:8080`、`NOMINATIM_LOCAL_IDENTITIES_ONLY=true`；这是 compiled Finch 和地址刷新生产路径的配置。
-- [router.ex](https://github.com/teslamate-org/teslamate/blob/33d200b2fba9d5138803916a788cef5eae31b1aa/elixir/lib/teslamate_web/router.ex) 与 [car_controller.ex](https://github.com/teslamate-org/teslamate/blob/33d200b2fba9d5138803916a788cef5eae31b1aa/elixir/lib/teslamate_web/controllers/car_controller.ex)：无 token 时 `/` 跳转 `/sign_in`；直接测 `/sign_in`、`/notice`、`/license`，不要要求首页直接 200。
+- [router.ex](https://github.com/teslamate-org/teslamate/blob/33d200b2fba9d5138803916a788cef5eae31b1aa/elixir/lib/teslamate_web/router.ex) 与 [car_controller.ex](https://github.com/teslamate-org/teslamate/blob/33d200b2fba9d5138803916a788cef5eae31b1aa/elixir/lib/teslamate_web/controllers/car_controller.ex)：无 token 时 `/` 跳转 `/sign_in`；直接测实际 `/sign_in` 登录表单，不要要求首页直接 200。
 - release 支持 `bin/teslamate rpc`；在运行容器执行 `Code.eval_file("/checks/runtime.exs")` 即可测试编译后的模块，无需将 ExUnit 加进发布镜像。
 
 ## 最小新增：GeoRelay 最终 release 运行检查
@@ -49,7 +49,7 @@ docker run --rm --network none \
 1. 构建完成后创建独立 `docker network create --internal`；在其中启动 `postgres:18-trixie`（与现有脚本一致）、tmpfs 数据目录和虚构 CI 密码，预建测试数据库。资源名包含 run/attempt/架构或随机值，所有容器均无 host port。
 2. 用已构建 `georelay-adapter:checked` 的 Python 运行小型只读挂载 stub（override entrypoint，不改产品 server）。stub 按路径、语言和固定公共坐标返回 Nominatim JSON：`/reverse` 返回本地负数 node 身份；`/lookup` 返回刷新后的名称/road/house_number/raw。另提供确定性的失败和缺失身份场景，并验证 lookup 请求/语言及未走 reverse fallback。复用现有 fixture 的字段形状与虚构文本。
 3. 正常运行 `georelay:checked` 的官方入口和 CMD，配置临时数据库、stub origin、local-only、禁用 MQTT、CI encryption key。独立网络阻断公网，无 token、车辆凭据或地图 Key。
-4. 使用 Python probe 容器（仍可复用 adapter 镜像）轮询 HTTP 至有界超时，检查 `/sign_in` 200 和 GeoRelay 品牌、来源/许可入口；检查 `/notice`、`/license` 和 favicon。这样同时证明入口迁移、完整 release 启动与静态资源打包。
+4. 使用 Python probe 容器（仍可复用 adapter 镜像）轮询 HTTP 至有界超时，检查 `/sign_in` HTTP200、HTML类型、无redirect、实际token表单与有界body。这样证明入口迁移与完整release启动，不依赖品牌、favicon或定制法律端点。
 5. 将小型 Elixir fixture 检查只读挂到 `/checks`，用 `docker exec <app> bin/teslamate rpc 'Code.eval_file("/checks/runtime.exs")'` 执行。用 pattern match/raise，而非 ExUnit；调用 compiled `Locations.find_address`，经过真实 Finch HTTP/stub 并在 PostgreSQL 保存负数身份。通过 `Locations.refresh_addresses` 验证 name/road/house_number/raw 更新，ID/osm_type/坐标保持；同批正数历史地址保持；行程/充电 address_id 引用保持。
 6. stub 返回错误或缺失本地身份时，要求明确 `{:error, ...}`，原地址未覆盖、地址数量不增、不生成 Unknown、不触发 reverse fallback。不要以 `/health` 或 TCP 就绪代替这些断言。
 7. 明确检查 RPC 失败退出码和成功标记，捕获容器提前退出/HTTP 超时；任一断言失败使本架构 build job 失败。正常结束及失败都清理 app/stub/db/probe、网络及临时卷；仅输出脱敏错误与合成 fixture 信息，不上传完整日志。
@@ -60,3 +60,5 @@ docker run --rm --network none \
 - 现有源码测试保留；runtime 补足包装、迁移、生产编译路径与跨容器 HTTP 契约。PG/stub/probe 仅 CI 临时资源，不接现有 Compose stack、host ports 或生产卷。
 - 启动门禁已有本机原生 arm64 真实证据：HTTP 200、105 项迁移及故障/超时/TERM 零残留，完整 98 项与最终专项 9 项通过（见 ../../10-03-main-image-smoke/validation.md）。云端两架构、adapter 镜像 suite 和 release RPC 地址断言仍须实际验证；不得把上述启动证据扩写成全闭环已通过。
 - 无真实地图服务、车辆登录、配额、生产数据升级/迁移验收；公开 fixture 和 CI stub 通过不能证明这些能力。
+
+2026-10-03最终整合：用户明确回复“合并，验证”，已授权本次bootstrap分支/PR合入并验证GHCR。整合main c8a6e83（PR9）地址-only修改，保留共享prepare、两个地址补丁与原生Dockerfile；删除品牌词/法律端点额外门禁，以真实登录表单、迁移和compiled地址RPC验收。旧品牌镜像测试记录仅为历史结果；最终以本次云端运行结果为准。

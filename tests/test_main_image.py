@@ -15,7 +15,7 @@ from urllib.error import HTTPError
 from urllib.request import Request, urlopen
 
 ROOT = Path(__file__).resolve().parents[1]
-LOGIN_HTML = ('<html><title>GeoRelay</title><form id="tokens" phx-submit="sign_in">'
+LOGIN_HTML = ('<html><title>TeslaMate</title><form id="tokens" phx-submit="sign_in">'
               '<input name="tokens[access]"><input name="tokens[refresh]"></form></html>')
 FAKE_DOCKER = '''#!/usr/bin/env python3
 import json, os, subprocess, sys, time
@@ -65,25 +65,21 @@ from urllib.error import HTTPError, URLError
 import urllib.request
 def fake_open(request, timeout):
     url = request if isinstance(request, str) else request.full_url
-    if url in ("http://app:4000/notice", "http://app:4000/license"):
+    assert url in ("http://app:4000/sign_in", "http://stub:8080/health") and timeout == 2
+    if url == "http://app:4000/sign_in":
         assert request.get_header("Accept") == "text/html"
-    assert url in ("http://app:4000/sign_in", "http://app:4000/notice", "http://app:4000/license", "http://stub:8080/health") and timeout == 2
     if os.environ["FAKE_MODE"] == "timeout":
         raise URLError("fake-private-error")
     if os.environ["FAKE_MODE"] == "http-error":
         raise HTTPError(url, 500, "fake-private-error", None, None)
     body = {
         "http://app:4000/sign_in": os.environ["FAKE_BODY"],
-        "http://app:4000/notice": "Copyright the TeslaMate contributors SPDX-License-Identifier: AGPL-3.0-or-later",
-        "http://app:4000/license": "GNU AFFERO GENERAL PUBLIC LICENSE Version 3, 19 November 2007",
         "http://stub:8080/health": '{"ok": true}',
     }[url]
-    if os.environ["FAKE_MODE"] == "legal-invalid" and url.endswith(os.environ["FAKE_LEGAL_PATH"]):
-        body = "Fixture Wrong Page"
     response = io.BytesIO(body.encode())
     response.status = 503 if os.environ["FAKE_MODE"] == "http-status" else 200
     response.headers = Message()
-    response.headers["Content-Type"] = os.environ.get("FAKE_CONTENT_TYPE", "text/html; charset=utf-8" if url.endswith("sign_in") else "text/plain" if url.startswith("http://app") else "application/json")
+    response.headers["Content-Type"] = os.environ.get("FAKE_CONTENT_TYPE", "text/html; charset=utf-8" if url.endswith("sign_in") else "application/json")
     response.geturl = lambda: os.environ.get("FAKE_REDIRECT", url)
     return response
 urllib.request.urlopen = fake_open
@@ -184,20 +180,32 @@ class MainImageSmokeTests(unittest.TestCase):
                     self.assertIn("state=exited exit=17", result.stderr)
                 self.assertFalse(any("psql" in command for command in state["commands"]))
 
-    def test_http_requires_login_html_brand_status_type_and_no_redirect(self):
+    def test_http_requires_token_form_status_type_and_no_redirect(self):
         cases = [
             {"mode": "http-status"}, {"mode": "http-error"},
             {"FAKE_CONTENT_TYPE": "application/json"}, {"FAKE_REDIRECT": "http://app:4000/"},
-            {"FAKE_BODY": "GeoRelay"}, {"FAKE_BODY": LOGIN_HTML.replace("GeoRelay", "other")},
+            {"FAKE_BODY": "TeslaMate"},
             {"FAKE_BODY": LOGIN_HTML.replace('name="tokens[access]"', 'name="unrelated"')},
+            {"FAKE_BODY": LOGIN_HTML.replace('name="tokens[refresh]"', 'name="unrelated"')},
+            {"FAKE_BODY": LOGIN_HTML.replace('phx-submit="sign_in"', 'phx-submit="other"')},
+            {"FAKE_BODY": LOGIN_HTML.replace('id="tokens"', 'id="other"')},
             {"FAKE_BODY": LOGIN_HTML + "x" * 262145},
+            {"FAKE_BODY": LOGIN_HTML + "é" * 131072},
         ]
         for case in cases:
             with self.subTest(case=list(case)):
                 result, state, _ = self.smoke(**case)
                 self.assertNotEqual(result.returncode, 0)
-                self.assertIn("HTTP login/legal response or fixture probe execution invalid", result.stderr)
+                self.assertIn("HTTP login response or fixture probe execution invalid", result.stderr)
                 self.assertFalse(any("psql" in command for command in state["commands"]))
+
+    def test_token_form_probe_accepts_ui_brand_changes(self):
+        body = LOGIN_HTML.replace("TeslaMate", "Fixture UI")
+        result, state, _ = self.smoke(FAKE_BODY=body)
+        self.assertEqual(result.returncode, 0, result.stderr)
+        self.assertTrue(any("rpc" in command for command in state["commands"]))
+        self.assertNotIn("/notice", result.stdout)
+        self.assertNotIn("/license", result.stdout)
 
     def test_missing_migrations_tables_and_query_errors_fail_and_clean(self):
         for mode in ("sql-empty", "sql-missing-table", "sql-error"):
@@ -262,12 +270,7 @@ class MainImageSmokeTests(unittest.TestCase):
                 self.assertNotIn("smoke passed", result.stdout)
                 self.assertTrue(state["networks"] if mode == "cleanup-error" else state["containers"])
 
-    def test_legal_content_and_compiled_rpc_must_pass_before_success(self):
-        for path in ("notice", "license"):
-            with self.subTest(path=path):
-                result, state, _ = self.smoke("legal-invalid", FAKE_LEGAL_PATH=path)
-                self.assertNotEqual(result.returncode, 0)
-                self.assertFalse(any("rpc" in command for command in state["commands"]))
+    def test_compiled_rpc_must_pass_before_success(self):
         result, _, _ = self.smoke("rpc-return")
         self.assertEqual(result.returncode, 0, result.stderr)
         for mode in ("rpc-error", "rpc-marker-missing", "rpc-marker-spoof"):

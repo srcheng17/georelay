@@ -150,11 +150,11 @@ TeslaMate 使用 [Elixir](https://elixir-lang.org/) 编写，将车辆数据保�
 
 ## 截图
 
-GeoRelay 使用独立名称并移除上游 Logo。界面和仪表盘功能来自上游应用；[上游截图文档](https://docs.teslamate.org/docs/screenshots/)展示了这些功能，截图使用上游品牌。
+GeoRelay 是仓库与镜像的项目名。应用保留上游 TeslaMate 的界面、名称和图标；[上游截图文档](https://docs.teslamate.org/docs/screenshots/)展示了这些功能。
 
 ## 版本维护
 
-项目每六小时检查官方稳定 release，并创建固定 tag 和 commit 的更新 PR。同仓 PR 与受控分支发布先经过原生 amd64/arm64 测试，包括镜像内 adapter 测试和应用启动、迁移、地址契约，再生成 beta 镜像；beta 不更新 `latest`。上游法律原文变化需人工复核，补丁冲突或检查失败停止发布。
+项目每六小时检查官方稳定 release，并创建固定 tag 和 commit 的更新 PR。同仓 PR 与受控分支发布先经过原生 amd64/arm64 测试，包括镜像内 adapter 测试和应用启动、迁移、地址契约，再生成 beta 镜像；beta 不更新 `latest`。上游名称、翻译、资源、法律文本和 Dockerfile 保持原样，准备过程只应用地址补丁；补丁冲突或检查失败停止发布。
 
 只有成功 beta 仍对应当前 PR commit、main 基线有效且分支保护允许时，发布控制器才自动合并，并显式触发 main 构建，发布正式版本与 `latest`。main 的镜像相关改动也发布已检查镜像；README、使用指南、agent 指令、Trellis 元数据和 Paseo 设置走轻量检查。成功、轻量检查和 check-only 不通知；镜像构建、测试、合并或发布失败时，通过仓库配置的 Actions Secret `BARK_URL` 发 Bark。控制器首次经过审阅合入 main 后，自动流程才会生效。
 
