@@ -1,0 +1,107 @@
+name: Validate and build
+
+on:
+  pull_request:
+  push:
+    branches: [main]
+  workflow_dispatch:
+    inputs:
+      publish:
+        description: Publish versioned images after all checks (main only; no deployment)
+        type: boolean
+        default: false
+
+permissions:
+  contents: read
+
+concurrency:
+  group: validate-${{ github.ref }}-${{ github.event_name }}
+  cancel-in-progress: false
+
+jobs:
+  verify:
+    runs-on: ubuntu-latest
+    timeout-minutes: 90
+    outputs:
+      version: ${{ steps.version.outputs.value }}
+    steps:
+      - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4
+        with:
+          persist-credentials: false
+      - name: Python checks
+        run: |
+          python3 -m unittest discover -s tests -v
+          git diff --check
+      - name: Check fixed upstream and apply every patch
+        run: python3 scripts/prepare_upstream.py "$RUNNER_TEMP/teslamate-upstream"
+      - name: Upstream contract tests in isolated containers
+        run: bash scripts/test_upstream.sh "$RUNNER_TEMP/teslamate-upstream"
+      - name: Version from reviewed pin and tested commit
+        id: version
+        run: |
+          tag=$(python3 -c 'import json; print(json.load(open("upstream.json"))["tag"])')
+          echo "value=${tag}-amap-${GITHUB_SHA}" >> "$GITHUB_OUTPUT"
+      - name: Build adapter and patched TeslaMate (linux/amd64)
+        env:
+          IMAGE_VERSION: ${{ steps.version.outputs.value }}
+        run: |
+          labels=(--label "org.opencontainers.image.source=https://github.com/$GITHUB_REPOSITORY" --label "org.opencontainers.image.revision=$GITHUB_SHA" --label "org.opencontainers.image.version=$IMAGE_VERSION")
+          docker build "${labels[@]}" --label 'org.opencontainers.image.title=TeslaMate AMap adapter (independent companion)' -t amap-adapter:checked adapter
+          docker build "${labels[@]}" --label 'org.opencontainers.image.title=TeslaMate (modified: configurable geocoder URL)' -t teslamate-amap:checked "$RUNNER_TEMP/teslamate-upstream"
+          docker run --rm --entrypoint /bin/sh teslamate-amap:checked -c 'test -s /usr/share/doc/teslamate/LICENSE && test -s /usr/share/doc/teslamate/NOTICE'
+      - name: Adapter container health without a key or host port
+        run: |
+          container="amap-check-${GITHUB_RUN_ID}-${GITHUB_RUN_ATTEMPT}"
+          volume="${container}-data"
+          trap 'docker rm -f "$container" >/dev/null 2>&1 || true; docker volume rm "$volume" >/dev/null 2>&1 || true' EXIT
+          docker volume create "$volume"
+          docker run -d --name "$container" --network none --mount "type=volume,source=$volume,target=/data" amap-adapter:checked
+          test "$(docker exec "$container" id -u)" != 0
+          healthy=false
+          for attempt in $(seq 1 20); do
+            if docker exec "$container" python -c 'import json, urllib.request; assert json.load(urllib.request.urlopen("http://127.0.0.1:8080/health", timeout=2)) == {"status": "ok"}' >/dev/null 2>&1; then
+              healthy=true
+              break
+            fi
+            sleep 1
+          done
+          test "$healthy" = true
+      - name: Preserve checked images for manual publication
+        if: github.event_name == 'workflow_dispatch' && inputs.publish && github.ref == 'refs/heads/main'
+        run: docker save -o "$RUNNER_TEMP/checked-images.tar" amap-adapter:checked teslamate-amap:checked
+      - uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02 # v4
+        if: github.event_name == 'workflow_dispatch' && inputs.publish && github.ref == 'refs/heads/main'
+        with:
+          name: checked-images
+          path: ${{ runner.temp }}/checked-images.tar
+          if-no-files-found: error
+          retention-days: 1
+          compression-level: 0
+
+  publish:
+    needs: verify
+    if: github.event_name == 'workflow_dispatch' && inputs.publish && github.ref == 'refs/heads/main'
+    runs-on: ubuntu-latest
+    timeout-minutes: 20
+    permissions:
+      contents: read
+      packages: write
+    steps:
+      - uses: actions/download-artifact@d3f86a106a0bac45b974a628896c90dbdf5c8093 # v4
+        with:
+          name: checked-images
+          path: ${{ runner.temp }}
+      - name: Publish only checked version tags
+        env:
+          GHCR_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+          IMAGE_VERSION: ${{ needs.verify.outputs.version }}
+        run: |
+          docker load -i "$RUNNER_TEMP/checked-images.tar"
+          printf '%s' "$GHCR_TOKEN" | docker login ghcr.io -u "$GITHUB_ACTOR" --password-stdin
+          trap 'docker logout ghcr.io' EXIT
+          repository="ghcr.io/${GITHUB_REPOSITORY,,}"
+          docker tag teslamate-amap:checked "${repository}-amap:${IMAGE_VERSION}"
+          docker tag amap-adapter:checked "${repository}-amap-adapter:${IMAGE_VERSION}"
+          docker push "${repository}-amap:${IMAGE_VERSION}"
+          docker push "${repository}-amap-adapter:${IMAGE_VERSION}"
+          printf 'Published checked linux/amd64 images:\n\n- `%s-amap:%s`\n- `%s-amap-adapter:%s`\n\nNo deployment performed.\n' "$repository" "$IMAGE_VERSION" "$repository" "$IMAGE_VERSION" >> "$GITHUB_STEP_SUMMARY"

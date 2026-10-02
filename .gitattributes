@@ -7,3 +7,7 @@
 # picking either side (task state lives in task.json, not index.md). See
 # .trellis/spec/cli/backend/directory-structure.md for details.
 .trellis/workspace/*/journal-*.md merge=union
+
+# Unified patch context uses a single space on blank lines. Applied source is
+# checked separately by prepare_upstream.py using git diff --check.
+patches/*.patch whitespace=-blank-at-eol

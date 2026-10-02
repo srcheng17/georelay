@@ -1,0 +1,4 @@
+{"file": ".trellis/spec/backend/index.md", "reason": "项目边界与质量门"}
+{"file": ".trellis/spec/backend/contracts.md", "reason": "跨层身份、错误、隐私契约"}
+{"file": ".trellis/spec/backend/quality-guidelines.md", "reason": "测试发布规则"}
+{"file": ".trellis/tasks/10-02-amap-mvp/research/contracts.md", "reason": "上游已核实来源与最小设计"}
