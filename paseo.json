@@ -15,10 +15,10 @@
       "instructions": "Use <type>/<short-kebab-case-description> in English. Choose type from feat, fix, docs, chore, ci, refactor, or test."
     },
     "commitMessage": {
-      "instructions": "Use Conventional Commits with a scope: <type>(<scope>): <short description>. Write the description in English. Use a scope that describes the changed component, such as adapter, upstream, release, or docs."
+      "instructions": "Use Conventional Commits with a scope: <type>(<scope>): <short description>. Write in English, in imperative mood, with no trailing period; keep the entire message within 72 characters. Choose a concise scope that reflects the changed area of the repository."
     },
     "pullRequest": {
-      "instructions": "Write the title and body in English. Start with a Summary and include a Test plan section. List only checks actually performed and their results; mark unperformed checks as Not run. Describe configuration, persistent-data, or image-publication impact when relevant. Never include API keys, credentials, or real vehicle locations. Pushing changes or opening a PR does not authorize merging. Leave the PR open and do not enable auto-merge unless the user explicitly requests merging this specific PR or branch."
+      "instructions": "Write the title and body in English. Use a concise Conventional Commits title with a relevant scope. Start the body with a Summary and include a Test plan section. List only checks actually performed and their results; mark unperformed checks as Not run. Describe relevant behavior, compatibility, configuration, or data impact and rollout or rollback requirements when applicable. Never include secrets or sensitive data. Creating or updating a PR does not authorize merging; keep it open unless the user explicitly requests merging it."
     }
   }
 }
