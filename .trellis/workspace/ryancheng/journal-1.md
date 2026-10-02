@@ -399,3 +399,34 @@ Synced concurrent main 3e6cbfa into feat/image-lifecycle, aligned retention with
 ### Next Steps
 
 - Verify native PR CI and leave PR open for user review
+
+
+## Session 13: Verify image lifecycle PR integration
+<!-- trellis-session: v=2 fp=6058dff4407dd8d0 -->
+
+**Date**: 2026-10-03
+**Task**: Verify image lifecycle PR integration
+**Branch**: `feat/image-lifecycle`
+
+### Summary
+
+Integrated docs and Paseo-only main advances into feat/image-lifecycle, preserving full session records and refined settings. Five isolated timing reproductions and the independent 87-test full suite passed without runtime/test changes. Initial amd64 CI timing failure is recorded; final native PR checks remain pending. No live image deletion, deployment or merge into main.
+
+### Git Commits
+
+| Hash | Message |
+|------|---------|
+| `8296b19` | chore(ci): sync main and preserve complete session records |
+| `714330c` | chore(paseo): sync refined project metadata from main |
+
+### Testing
+
+- [OK] 87 tests passed in 46.036 seconds; full-scope review and static checks passed
+
+### Status
+
+[OK] **Completed**
+
+### Next Steps
+
+- Verify latest native amd64 and arm64 PR checks; leave PR open without auto-merge for user review
