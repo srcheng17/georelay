@@ -173,3 +173,37 @@ Implemented and verified mainland AMap / overseas OSM sidecar and fixed-release 
 ### Next Steps
 
 - 推送当前功能分支，核对最终verify；不合并、发布或部署。
+
+
+## Session 6: README 中英文与版式整理
+<!-- trellis-session: v=2 fp=b18cc1ee09c70d81 -->
+
+**Date**: 2026-10-02
+**Task**: README 中英文与版式整理
+**Branch**: `feat/amap-adapter`
+
+### Summary
+
+默认英文README、中文可选，参考Immich/Syncthing/RustDesk整理语言导航与截图折叠，删除第三方客户端说明。
+
+### Main Changes
+
+- 两版顶部语言切换和短导航，使用入口靠前，官方功能和长列表折叠；保留许可来源并准确说明版本流程。
+
+### Git Commits
+
+| Hash | Message |
+|------|---------|
+| `feca63335c8cb1ff31570f90cd10c827aafc6388` | docs: add bilingual README navigation and layout |
+
+### Testing
+
+- [OK] 49个相对链接锚点、双语结构内容及独立审查通过；GitHub官方Markdown渲染保留标题、三图、三个折叠区。
+
+### Status
+
+[OK] **Completed**
+
+### Next Steps
+
+- 推送当前功能分支并核对最终GitHub verify；不合并、发布或部署。

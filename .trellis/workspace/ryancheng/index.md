@@ -8,7 +8,7 @@
 
 <!-- @@@auto:current-status -->
 - **Active File**: `journal-1.md`
-- **Total Sessions**: 5
+- **Total Sessions**: 6
 - **Last Active**: 2026-10-02
 <!-- @@@/auto:current-status -->
 
@@ -19,7 +19,7 @@
 <!-- @@@auto:active-documents -->
 | File | Lines | Status |
 |------|-------|--------|
-| `journal-1.md` | ~175 | Active |
+| `journal-1.md` | ~209 | Active |
 <!-- @@@/auto:active-documents -->
 
 ---
@@ -29,6 +29,7 @@
 <!-- @@@auto:session-history -->
 | # | Date | Title | Commits | Branch |
 |---|------|-------|---------|--------|
+| 6 | 2026-10-02 | README 中英文与版式整理 | `feca63335c8cb1ff31570f90cd10c827aafc6388` | `feat/amap-adapter` |
 | 5 | 2026-10-02 | README 文字与结构优化 | `f8ad02d328fffd989d82b7151748930b26e821b7` | `feat/amap-adapter` |
 | 4 | 2026-10-02 | 公开仓库与 README 整理 | `1482e5894834c8459bd5ec862a98058b90adbd7d` | `feat/amap-adapter` |
 | 3 | 2026-10-02 | 真实地址样本核对与 AOI/POI 名称修复 | `99b67ea` | `feat/amap-adapter` |
