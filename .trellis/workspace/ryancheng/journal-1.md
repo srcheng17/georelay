@@ -265,3 +265,37 @@ PR #1 已正常合并；main CI 37029960665 两架构及发布成功，两个 GH
 ### Next Steps
 
 - 运行中的TeslaMate服务保持原状；生产升级和历史地址迁移另行安排。
+
+
+## Session 10: Optimize image build and retention lifecycle
+<!-- trellis-session: v=2 fp=b61ef1b66200d403 -->
+
+**Date**: 2026-10-03
+**Task**: Optimize image build and retention lifecycle
+**Branch**: `feat/image-lifecycle`
+
+### Summary
+
+Added metadata-only CI gating with required verify and dual-architecture validation preserved. Added preview-first paired GHCR retention for latest and ten complete releases. Full-scope review and 78 tests passed; native CI will be verified on the open PR. No live deletion, deployment or merge.
+
+### Main Changes
+
+- CI gating and conservative grouped GHCR retention with offline regression coverage
+
+### Git Commits
+
+| Hash | Message |
+|------|---------|
+| `b9e524c9f44b46578bd9c8e05002a823e992d8ac` | ci(release): optimize image builds and retention |
+
+### Testing
+
+- [OK] 78 Python tests, actionlint, compilation, shell syntax, whitespace and documentation links passed
+
+### Status
+
+[OK] **Completed**
+
+### Next Steps
+
+- Inspect native PR checks; await explicit user instruction before merging
