@@ -185,7 +185,7 @@ sidecar 的缓存 TTL 不会自动更新 PostgreSQL 里的已有地址。应用�
 4. 检查全部通过后，从两份已测试镜像产物发布架构标签和多架构版本索引，不重新构建。`main` 上影响镜像的 push 也会自动发布；仍可在 `main` 手动运行并勾选 `publish`。
 5. 两个版本索引都发布并验证后，更新两个 `latest` 并回读核对。发布任务串行执行，过期的官方版本或源码任务不能覆盖 `latest`。两个 package 无法原子更新；任何更新或回读失败都会让工作流失败，此时两个 `latest` 可能暂时不一致，应使用已发布的相同固定版本。
 
-两个公开镜像使用同一版本，标签格式为 `<upstream-tag>-georelay-<完整源码commit>`：
+两个公开镜像使用中性包名 `georelay` 与 `georelay-adapter`，不会随源码仓库重命名而改变；只随发布 owner 使用对应命名空间。它们使用同一版本，标签格式为 `<upstream-tag>-georelay-<完整源码commit>`：
 
 ```text
 ghcr.io/srcheng17/georelay:<version>

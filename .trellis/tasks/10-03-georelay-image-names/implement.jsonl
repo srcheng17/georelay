@@ -1,0 +1,5 @@
+{"file": ".trellis/spec/backend/contracts.md", "reason": "runtime compatibility and privacy"}
+{"file": ".trellis/spec/backend/quality-guidelines.md", "reason": "publish retention and CI gates"}
+{"file": ".trellis/tasks/10-03-georelay-image-names/prd.md", "reason": "approved naming and deployment scope"}
+{"file": ".trellis/tasks/10-03-georelay-image-names/design.md", "reason": "public package mapping and compatibility"}
+{"file": ".trellis/tasks/10-03-georelay-image-names/implement.md", "reason": "validation and manual merge boundary"}

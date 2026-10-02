@@ -187,6 +187,24 @@ class PublicationTests(unittest.TestCase):
         for package in ("ghcr.io/example/georelay", "ghcr.io/example/georelay-adapter"):
             self.assertEqual(state["indexes"][package + ":latest"], state["indexes"][package + ":" + version])
 
+    def test_public_packages_do_not_follow_repository_name(self):
+        result, commands = self.publish(GITHUB_REPOSITORY="Example/Renamed-Project")
+        self.assertEqual(result.returncode, 0, result.stderr)
+        version = json.loads((self.repo / "upstream.json").read_text())["tag"] + "-georelay-" + self.git("rev-parse", "HEAD")
+        packages = ("georelay", "georelay-adapter")
+        expected = [
+            ["tag", package + ":checked", "ghcr.io/example/" + package + ":" + version + "-" + architecture]
+            for architecture in ("amd64", "arm64") for package in packages
+        ]
+        self.assertEqual([command for command in commands if command[0] == "tag"], expected)
+        self.assertEqual([command[-1] for command in commands if command[0] == "push"], [command[-1] for command in expected])
+        latest = self.latest_commands(commands)
+        self.assertEqual([command[command.index("--tag") + 1] for command in latest], ["ghcr.io/example/" + package + ":latest" for package in packages])
+        summary = (self.directory / "summary.md").read_text()
+        for package in packages:
+            self.assertIn("ghcr.io/example/" + package + ":" + version, summary)
+        self.assertNotIn("renamed-project", summary)
+
     def test_publication_failure_stops_before_indexes(self):
         for overrides in ({"FAKE_FAIL_PUSH": "arm64"}, {"FAKE_BAD_LABEL": "1"}):
             with self.subTest(overrides=overrides):

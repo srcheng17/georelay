@@ -37,7 +37,8 @@ def group(number):
 
 
 class PackageFixture:
-    def __init__(self, count=12, owner_type="User"):
+    def __init__(self, count=12, owner_type="User", repository=REPOSITORY):
+        self.repository = repository
         self.owner_type, self.events, self.fail = owner_type, [], None
         self.rows = {package: [] for package in PACKAGES}
         self.manifests = {package: {} for package in PACKAGES}
@@ -100,15 +101,16 @@ class PackageFixture:
         self.events.append((method, path))
         if self.fail == (method, path):
             raise RuntimeError("private-token-response")
-        if path == "repos/" + REPOSITORY:
-            return {"full_name": REPOSITORY, "owner": {"login": "fixture", "type": self.owner_type}}
-        prefix = ("users/" if self.owner_type == "User" else "orgs/") + "fixture/packages/container/"
+        owner = self.repository.split("/")[0]
+        if path == "repos/" + self.repository:
+            return {"full_name": self.repository, "owner": {"login": owner, "type": self.owner_type}}
+        prefix = ("users/" if self.owner_type == "User" else "orgs/") + owner + "/packages/container/"
         suffix = path.removeprefix(prefix)
         package = suffix.split("/")[0]
         if package not in PACKAGES:
             raise AssertionError((method, path))
         if suffix == package:
-            return {"name": package, "package_type": "container", "repository": {"full_name": REPOSITORY}}
+            return {"name": package, "package_type": "container", "repository": {"full_name": self.repository}}
         if method == "GET" and suffix.startswith(package + "/versions?"):
             page = int(parse_qs(path.split("?", 1)[1])["page"][0])
             rows = list(reversed(self.rows[package]))
@@ -124,7 +126,7 @@ class PackageFixture:
         return copy.deepcopy(self.manifests[package][name])
 
     def run(self, apply=False):
-        return retention.retain_images(REPOSITORY, apply=apply, api=self.api, fetch=self.fetch)
+        return retention.retain_images(self.repository, apply=apply, api=self.api, fetch=self.fetch)
 
     def deletes(self):
         return [event for event in self.events if event[0] == "DELETE"]
@@ -135,22 +137,25 @@ class RetentionTests(unittest.TestCase):
         publisher = test_publish.PublicationTests("test_checked_architectures_are_pushed_before_next_load")
         self.addCleanup(publisher.doCleanups)
         publisher.setUp()
-        result, commands = publisher.publish(GITHUB_REPOSITORY=REPOSITORY)
-        self.assertEqual(result.returncode, 0, result.stderr)
-        pushed = [command[-1].removeprefix("ghcr.io/").rsplit(":", 1) for command in commands if command[0] == "push"]
-        report = PackageFixture().run()
-        self.assertEqual({package for package, _ in pushed}, {"fixture/" + package for package in report["packages"]})
-        self.assertEqual(set(report["packages"]), {"georelay", "georelay-adapter"})
-        versions = [command[command.index("--tag") + 1].rsplit(":", 1)[1] for command in commands if command[:3] == ["buildx", "imagetools", "create"] and not command[command.index("--tag") + 1].endswith(":latest")]
-        for tag in versions:
-            match = retention.RELEASE.fullmatch(tag)
-            self.assertIsNotNone(match)
-            self.assertIsNone(match[2])
-        for _, tag in pushed:
-            match = retention.RELEASE.fullmatch(tag)
-            self.assertIsNotNone(match)
-            self.assertIn(match[1], versions)
-            self.assertIn(match[2], ("amd64", "arm64"))
+        for repository in (REPOSITORY, "fixture/renamed-project", "FiXtUrE/Renamed-Project"):
+            with self.subTest(repository=repository):
+                result, commands = publisher.publish(GITHUB_REPOSITORY=repository)
+                self.assertEqual(result.returncode, 0, result.stderr)
+                pushed = [command[-1].removeprefix("ghcr.io/").rsplit(":", 1) for command in commands if command[0] == "push"]
+                report = PackageFixture(repository=repository).run()
+                owner = repository.split("/")[0].lower()
+                self.assertEqual({package for package, _ in pushed}, {owner + "/" + package for package in report["packages"]})
+                self.assertEqual(set(report["packages"]), {"georelay", "georelay-adapter"})
+                versions = [command[command.index("--tag") + 1].rsplit(":", 1)[1] for command in commands if command[:3] == ["buildx", "imagetools", "create"] and not command[command.index("--tag") + 1].endswith(":latest")]
+                for tag in versions:
+                    match = retention.RELEASE.fullmatch(tag)
+                    self.assertIsNotNone(match)
+                    self.assertIsNone(match[2])
+                for _, tag in pushed:
+                    match = retention.RELEASE.fullmatch(tag)
+                    self.assertIsNotNone(match)
+                    self.assertIn(match[1], versions)
+                    self.assertIn(match[2], ("amd64", "arm64"))
 
     def test_legacy_release_tags_are_preserved_and_legacy_packages_are_untouched(self):
         fixture = PackageFixture(13)
@@ -165,7 +170,8 @@ class RetentionTests(unittest.TestCase):
             for row in fixture.rows[package][:3]:
                 self.assertNotIn(row["name"], removed)
                 self.assertTrue(all(retention.RELEASE.fullmatch(tag) is None for tag in row["metadata"]["container"]["tags"]))
-        self.assertFalse(any("teslamate-amap" in event[1] for event in fixture.events))
+        package_events = [event[1] for event in fixture.events if "/packages/container/" in event[1]]
+        self.assertEqual({path.split("/")[4] for path in package_events}, set(PACKAGES))
 
     def test_default_preview_paginates_and_keeps_ten_by_creation_date(self):
         fixture = PackageFixture(40)
@@ -321,13 +327,22 @@ class RetentionTests(unittest.TestCase):
         response = MagicMock()
         response.__enter__.return_value.read.return_value = raw
         with patch.object(retention, "urlopen", return_value=response) as fetch, patch.object(retention, "registry_token", return_value="fixture-token"):
-            self.assertEqual(retention.registry_manifest("fixture", PACKAGES[0], digest(raw)), data)
+            self.assertEqual(retention.registry_manifest("FiXtUrE", PACKAGES[0], digest(raw)), data)
+            self.assertEqual(fetch.call_args.args[0].full_url, "https://ghcr.io/v2/fixture/" + PACKAGES[0] + "/manifests/" + digest(raw))
             self.assertEqual(fetch.call_args.kwargs["timeout"], 20)
             with self.assertRaises(ValueError):
                 retention.registry_manifest("fixture", PACKAGES[0], "sha256:" + "a" * 64)
         response.__enter__.return_value.read.return_value = b"x" * 1_048_577
         with patch.object(retention, "urlopen", return_value=response), self.assertRaises(ValueError):
             retention.response_bytes("https://ghcr.io/token", {})
+
+    def test_registry_token_uses_lowercase_owner_scope(self):
+        retention.registry_token.cache_clear()
+        self.addCleanup(retention.registry_token.cache_clear)
+        with patch.object(retention, "response_bytes", return_value=b'{"token":"fixture-token"}') as fetch:
+            self.assertEqual(retention.registry_token("FiXtUrE", PACKAGES[0]), "fixture-token")
+        query = parse_qs(fetch.call_args.args[0].split("?", 1)[1])
+        self.assertEqual(query["scope"], ["repository:fixture/" + PACKAGES[0] + ":pull"])
 
 
 if __name__ == "__main__":

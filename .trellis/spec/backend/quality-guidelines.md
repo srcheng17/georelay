@@ -37,14 +37,14 @@ README 按使用者需要组织用途、功能和使用入口，验收数字、P
 - `python3 scripts/ci_changes.py`：从 GitHub 事件与实际 checkout 判断 `image_required=true|false`；缺少比较基线时要求构建。
 - 输入环境为 `GITHUB_EVENT_NAME`、`GITHUB_EVENT_PATH`、`GITHUB_SHA`；事件 JSON 使用 `pull_request.base.sha` 或 push 的 `before`。有效基线和目标必须是非零 40 位小写 hex。结果追加到 `GITHUB_OUTPUT` 并打印。
 - `python3 scripts/retain_images.py --repository OWNER/REPO [--output PATH] [--apply]`：默认只读预览；显式 apply 才删除。
-- GitHub Packages 的 user/org container versions 分页 GET 和 version DELETE；GHCR manifest 按 digest 读取。仓库名决定 publisher 对应的两个 package。
+- GitHub Packages 的 user/org container versions 分页 GET 和 version DELETE；GHCR manifest 按 digest 读取。publisher 与 retention 固定使用 `georelay`、`georelay-adapter`，由仓库 owner 决定命名空间；仓库 basename 改名不改变包名，OCI source/revision 仍跟随真实源码仓库。
 - 清理 workflow 手动输入 `dry_run` 默认为 true；只在 main 执行，每周定时 apply。
 
 ### 3. Contracts
 
 - Python/空白 checks 必须成功。verify 总是出现；image_required=true 只接受 build success，false 只接受 build skipped。缺失/非法输出或失败/取消都拒绝。
 - 只有确认全为轻量路径的变更可跳过；运行代码、补丁、pin、测试、构建/发布和未知路径完整构建。`MODIFICATIONS.md` 与 `TRADEMARK.md` 是镜像或法律验证输入，必须完整构建。删除/重命名的旧新路径都计入。dispatch 始终构建。
-- 保留 publisher 当前使用的两个 package（仓库小写名称和名称加 `-adapter`）都完整的最新十组 `vMAJOR.MINOR.PATCH-georelay-<40hex>`、latest 与其全部引用。旧 teslamate-amap 包不再发布新版本，本策略保留原状。完整组的两个索引必须各含且仅含 linux/amd64、linux/arm64，digest 匹配相应架构标签和版本记录。
+- 保留 publisher 当前使用的两个 package（`georelay`、`georelay-adapter`）都完整的最新十组 `vMAJOR.MINOR.PATCH-georelay-<40hex>`、latest 与其全部引用。旧 teslamate-amap 包不再发布新版本，本策略保留原状。完整组的两个索引必须各含且仅含 linux/amd64、linux/arm64，digest 匹配相应架构标签和版本记录。
 - 以完整发布组的创建时间排序；latest 单独保护，不能用其更新时间替代版本排序。其他保留标签、共享子镜像、不完整/未知组及未关联无标签记录同样不得误删。
 - 两个 package 的全部读取与计划验证完成后才允许 DELETE；先删旧索引再删不再被保留引用的子镜像。读取/解析失败在写入前停止，DELETE 失败停止后续删除。
 - 清理 JSON 报告含 `mode`、`repository`、`keep_releases=10`、`complete_releases`、`incomplete_releases`、`retained_releases`、`candidate_releases`，以及每个 package 的 `versions/protected/latest/delete`；delete 条目是 `id/digest/kind`。REST 清单每页 100 条，最多 200 页，重复 id/digest/tag 或无时区创建时间均拒绝。
