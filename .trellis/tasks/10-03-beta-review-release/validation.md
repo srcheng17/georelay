@@ -1,5 +1,7 @@
 # Beta 发布链路验证记录
 
+当前云端进度见文末及 [cloud-validation.json](cloud-validation.json)；前面的本地/bootstrap记录按当时状态保留，不能作为当前未完成项列表。
+
 最新状态：用户已明确授权“合并，验证”。main c8a6e83（PR9）已整合，保留地址-only共享prepare与原Dockerfile；启动门禁已移除品牌/法律端点检查。整合后的完整130/130通过（85.830秒），Trellis复核通过。下面旧arm64三补丁/品牌镜像结果仅为历史验证；本次最终镜像以新PR云端native amd64/arm64结果为准，不能复用旧镜像声明整合启动成功。云端结果将记录在cloud-validation.json。
 
 日期：2026-10-03。分支 `feat/beta-review-release`，本地基线 `da6cc08`。用户已批准实施和未来条件合并；本次 bootstrap PR 仍须明确审阅合并。本地验证结束时尚未提交；未push、创建 PR、调用真实 merge/dispatch、发布镜像、发送真实 Bark 或操作运行服务。
@@ -8,9 +10,9 @@
 
 - CI 检出实际 PR head，原生 amd64/arm64 分别执行完整源码检查、共享 prepare/ExUnit、镜像内 adapter suite、主应用默认入口/迁移/HTTP/许可/编译后地址契约，然后才保存产物。两架构与 verify 全通过才发布同一已检查产物，publisher 不重建。
 - main 发布正式版本及 latest；同仓 PR/受控分支 publish dispatch 发布 beta/beta-pr-N，不触碰 latest。官方稳定 tag→commit 检查保留，latest 跟随 main 已审阅 pin。
-- 可信 main 控制器认证 run/jobs/verify/registry OCI，当前 PR head/main 祖先与 GraphQL严格保护均有效才普通 expected-head merge；单次回读确认后 expected-main-SHA/source-PR dispatch。来源/保护读取失败拒绝合并，不新增 PAT。
+- 可信 main 控制器认证 run/jobs/verify/registry OCI，当前 PR head/main 祖先与公开 protected/enabled/everyone/verify app15368 摘要均有效才普通 expected-head merge；现有 strict 保护由 GitHub 合并端原子执行；单次回读确认后 expected-main-SHA/source-PR dispatch。来源/保护读取失败拒绝合并，不新增 PAT。
 - 失败通知与成功合并门禁独立：无产物 beta 失败、已合并 PR 的 main 失败仍通知；轻量、check-only、fork与正常陈旧成功候选不通知。Bark endpoint 仅发送步骤可见，固定脱敏 payload、先 dry-run、有界重试、响应 code200验证；terminal uncertain 不盲目重发。
-- 修复最终审查发现的轻量跳过被误报为 beta 失败，以及保护检查须显式要求 requiresStatusChecks 启用。README中英、AMAP与spec已同步。
+- 修复最终审查发现的轻量跳过被误报为 beta 失败，以及保护摘要检查须显式要求 protected/enabled/everyone 与 verify app15368。README中英、AMAP与spec已同步。
 
 ## 最终镜像实际运行证据
 
@@ -77,3 +79,11 @@ The early-failure test run 37072800085 had zero artifacts and skipped publicatio
 PR11 run 37073109247 at 9fa79ae revealed another old success-test timing assumption: fifty cold baidu lookups exceeded a 1 s fixture budget; production default is 20 s. amd64 main startup was skipped, arm64 startup passed, verify failed and publication was blocked. Trusted controller 37073595194 accurately associated PR11/run/commit, sent Bark in one HTTP 200 attempt and did not merge or dispatch main.
 
 Controlled 30 ms lookup-connection delay reproduced the original 1 s failure on isolated Linux arm64 in both providers (2.021 s total). The positive fixture now allows 5 s and retains fifty complete results, provider counts, ordering, coordinates and identities, wall-clock bound and 1 < peak <= 4. Under the same delay it passed (3.125 s total); a single-worker mutation returned all results within 5 s but was rejected by peak=1 in both providers (4.689 s total). Provider delays and production deadlines were unchanged, and independent failure-deadline/queue-cancel cases remain. Linux packaged suite passed 34/34 in 13.603 s; reviewer focused tests passed 5/5. New exact-head cloud verification remains required.
+
+## Hosted token protection capability and native enforcement (2026-10-03)
+
+PR11 exact head c12b7e6 passed beta run 37074314019 on native amd64 and arm64: packaged adapter 34/34, default main HTTP 200, 105 migrations, core tables and compiled address contract; verify/publication and registry/OCI/alias checks passed, latest stayed at the verified main 5727 indexes. Trusted controller 37074994812 failed closed at branch_protection, did not merge/dispatch and sent a verified failure Bark.
+
+A separate check-only probe run 37076000025 used the same Actions token permissions and only GET/GraphQL queries. `branches/main` returned protected=true, protection.enabled=true, enforcement_level=everyone and verify app15368. The REST required-status detail returned HTTP 403; full and four separate GraphQL rule-field queries all returned FORBIDDEN at repository.ref.branchProtectionRule. Active rules were empty because the repository uses legacy branch protection. The probe intentionally failed after its safe summaries, and controller 37076023220 skipped notification (notify=false, Bark step skipped); no images/artifacts were produced. Its remote/local branch and temporary worktree were removed after verifying the expected SHA.
+
+Owner-authenticated readback still confirmed the existing main rule: strict=true, enforce_admins=true and verify app15368. Settings were unchanged. The minimal controller fix reads the accessible summary and rejects absent/disabled/admin-exempt/wrong-app checks, then uses ordinary expected-head merge. GitHub atomically enforces the existing strict rule at the merge endpoint; the controller does not claim to independently read the unexposed strict flag and never requests an administrator credential or bypass. Fixture first reproduced the old Forbidden failure and then passed 15/15 after the native fix. New exact-head beta checks, installation to trusted main and actual default-token merge/dispatch remain required.

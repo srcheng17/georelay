@@ -42,7 +42,7 @@ body: {"sha": "<已测试的 PR head SHA>", "merge_method": "merge"}
 5. 读取当前 main SHA，核对 PR 分支包含当前 main（例如 compare 的 merge base 等于当前 main SHA），保留现有 strict verify protection。若 main 在测试后更新，重新测试最新 base/head，不自动 update/rebase 后沿用旧 beta 成功结论。
 6. 在共享的仓库合并 concurrency group 中最后一次重读 PR head/main 与条件，再发送带 expected head SHA 的 REST merge。
 
-REST merge 只支持 expected head，不支持 expected base SHA；读取 base 与调用之间仍可能有竞态。当前服务器端 strict status protection 是 base freshness 的最终原子门控，不能把客户端 compare 当成完全消除竞态。REST保护设置读取需要管理权限；实现使用固定只读GraphQL ref.branchProtectionRule 查询 requiresStatusChecks、requiresStrictStatusChecks、isAdminEnforced 与 requiredStatusChecks 的 verify/Actions app来源。当地既有gh身份已回读通过；Actions GITHUB_TOKEN权限仍需云端验证，读失败拒绝merge并通知，不新增管理员凭据。独立compare仍检查base freshness。
+REST merge 只支持 expected head，不支持 expected base SHA；读取 base 与调用之间仍可能有竞态。当前服务器端 strict status protection 是 base freshness 的最终原子门控，不能把客户端 compare 当成完全消除竞态。历史方案尝试固定只读 GraphQL ref.branchProtectionRule 查询 strict/admin/verify 来源；本地 gh 身份可读，但同权限 Actions 探针37076000025已证实该查询 FORBIDDEN，REST保护详情也为403。当前实现改用默认token可读的 GET branches/main protected/enabled/everyone/verify app15368 摘要；缺字段、读取失败或不符仍拒绝merge并通知。摘要不提供strict标志，现有strict保护由 GitHub 普通合并端原子执行；独立compare仍检查base freshness，不新增管理员凭据或bypass。
 
 若其他用户已合并或 API 返回结果不确定，先回读 PR 和 merge commit，不盲目再次合并，也不能把“当前 head 已变”解释成旧候选仍可合并。
 

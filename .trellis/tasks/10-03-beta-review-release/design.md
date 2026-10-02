@@ -35,6 +35,7 @@
 - 独立 workflow_run 控制器来自可信 main，不 checkout/执行 PR 代码或候选脚本；只读取 API/registry 元数据。fork 的候选不接触写 token/Bark Secret。
 - 成功路径逐项校验预期 workflow/run/event、同仓 PR/base main、open/non-draft、tested head、有效 main 基线、两个原生 job、明确 success 的 verify 与双 package beta 索引。不能用 skipped/neutral 或其他 run/app 的 verify 当成功。
 - 共享 merge concurrency 下最后重读条件；普通 REST merge 带 expected head sha，并依赖 strict protection 防 base 竞态。unknown mergeability 有界重读，冲突/blocked 停止。无需打开 repository allow_auto_merge，不 rebase/update branch 后沿用旧 beta 结论（research/auto-merge.md）。
+- 默认Actions token实测不能读取GraphQL保护规则或REST strict详情；改读branches/main公开摘要，要求protected/enabled、enforcement_level=everyone及verify app15368。main已核验strict/enforce_admins继续由普通merge端原子执行，摘要不提供strict标志时不得声称已独立读取；不申请管理员凭据、不绕过保护。
 - 回读 merged=true/merge commit 后显式 workflow_dispatch main；输入 expected_main_sha 与 source_pr。正式 run 开始核对 commit，latest 推广前再读 current main。稳定 run 不重新触发 merge，避免递归。
 - 成功但 head/base 已变化、PR closed/draft 的候选仅跳过；不冒充失败，也不合并。合并结果不确定先回读，dispatch 失败报告“已合并，正式发布触发未确认”，不再次 merge 或承诺回滚。
 

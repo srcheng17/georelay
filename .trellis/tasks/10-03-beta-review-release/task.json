@@ -23,6 +23,6 @@
   ],
   "parent": null,
   "relatedFiles": [],
-  "notes": "用户明确授权本任务合并验证及未来条件自动合并，范围仅GHCR。PR10已普通expected-head merge为5727c65，main正式run37072746968双架构启动/105迁移/地址/adapter34及发布通过；两个正式OCI索引/latest精确一致。BARK_URL已安全配置，早期失败run37072800085与PR11失败37073109247均由可信main控制器准确通知，sender一次HTTP200/code200成功。临时failure分支已删除。PR11因正向50批量fixture1s吞吐假设失败，发布/merge/dispatch均阻断；仅修fixture为5s并保留peak并发/完整结果/global失败deadline。Linux34/34与串行mutation拒绝通过，新head云端与默认Actions合并dispatch待验收。不更新运行容器，不绕过保护。",
+  "notes": "用户明确授权本任务合并验证及未来条件自动合并，范围仅GHCR。PR10/main5727正式run37072746968双架构实际启动/105迁移/adapter34与正式latest回读成功。BARK_URL安全配置，多次真实失败准确通知，临时failure/protection probe分支及目录已清理。PR11 c12beta37074314019双架构/verify/pub/索引/alias全部成功，但默认token Graph保护读取FORBIDDEN而阻止merge/dispatch。只读同权限探针37076000025证明GET branches/main摘要可见，strict详情403/Graph FORBIDDEN；现有main strict/admin/verify owner读回仍有效，设置未改。最小修正用公开protected/enabled/everyone/verify15368 gate与GitHub普通expected-head merge原子执行server strict，不新增admin凭据或bypass。控制器15/15，本次修正云端beta/可信main安装/默认token实际merge dispatch待验收，不更新运行容器。",
   "meta": {}
 }

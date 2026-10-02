@@ -40,8 +40,11 @@ class Fixture:
         self.check = {"app": {"id": 15368}, "name": "verify", "head_sha": HEAD, "status": "completed", "conclusion": "success",
                       "details_url": self.run["html_url"] + "/job/" + str(verify["id"])}
         self.comparison = {"status": "ahead", "merge_base_commit": {"sha": MAIN}}
-        self.protection = {"requiresStatusChecks": True, "requiresStrictStatusChecks": True, "isAdminEnforced": True,
-                           "requiredStatusChecks": [{"context": "verify", "app": {"databaseId": 15368}}]}
+        self.branch_summary = {"name": "main", "protected": True, "protection": {
+            "enabled": True, "required_status_checks": {
+                "enforcement_level": "everyone", "checks": [{"context": "verify", "app_id": 15368}],
+            },
+        }}
         self.calls, self.fetches = [], []
         self.documents = {}
         self.fail, self.merge_result, self.changed_on_last_read = None, True, False
@@ -88,10 +91,11 @@ class Fixture:
             pin = {"tag": "v4.3.0", "commit": MAIN, "repository": "https://github.com/teslamate-org/teslamate.git"}
             return {"type": "file", "encoding": "base64", "content": base64.b64encode(json.dumps(pin).encode()).decode()}
         if path == "graphql":
-            self.assert_graphql_read(payload)
+            raise RuntimeError("Protection rule query forbidden for Actions token")
+        if path == "/branches/main":
             if self.changed_after_protection_read:
                 self.pull["head"]["sha"] = "d" * 40
-            return {"data": {"repository": {"ref": {"branchProtectionRule": copy.deepcopy(self.protection)}}}}
+            return copy.deepcopy(self.branch_summary)
         if path == "/git/ref/heads/main":
             return {"object": {"type": "commit", "sha": MAIN}}
         if path == "/git/ref/heads/feature":
@@ -117,15 +121,8 @@ class Fixture:
     def control(self, apply=True):
         return control.control(REPO, 10, 1, self.api, self.fetch, apply=apply, sleep=lambda _: None)
 
-    @staticmethod
-    def assert_graphql_read(payload):
-        if not payload["query"].startswith("query(") or "mutation" in payload["query"]:
-            raise AssertionError("Protection metadata must be read only")
-        if payload["variables"] != {"owner": "fixture", "name": "georelay"}:
-            raise AssertionError("Protection metadata must target this repository")
-
     def writes(self):
-        return [call for call in self.calls if call[0] != "GET" and call[1] != "graphql"]
+        return [call for call in self.calls if call[0] != "GET"]
 
 
 class ReleaseControlTests(unittest.TestCase):
@@ -139,6 +136,8 @@ class ReleaseControlTests(unittest.TestCase):
             ("POST", "/actions/workflows/ci.yml/dispatches", {"ref": "main", "inputs": {"publish": "true", "expected_main_sha": MERGED, "source_pr": "7"}}),
         ])
         self.assertEqual({row[1] for row in fixture.fetches}, {"georelay", "georelay-adapter"})
+        self.assertIn(("GET", "/branches/main", None), fixture.calls)
+        self.assertFalse(any(path == "graphql" or "/protection" in path for _, path, _ in fixture.calls))
         fixture = Fixture()
         self.assertEqual(fixture.control(apply=False)["status"], "dry_run")
         self.assertEqual(fixture.writes(), [])
@@ -223,12 +222,14 @@ class ReleaseControlTests(unittest.TestCase):
             self.assertLessEqual(fixture.pull_reads, 4)
 
     def test_missing_loose_admin_exempt_or_wrong_verify_app_protection_blocks_merge(self):
-        for change in (lambda f: f.protection.update(requiresStatusChecks=False),
-                       lambda f: f.protection.update(requiresStrictStatusChecks=False),
-                       lambda f: f.protection.update(isAdminEnforced=False),
-                       lambda f: f.protection.update(requiredStatusChecks=[]),
-                       lambda f: f.protection["requiredStatusChecks"][0]["app"].update(databaseId=99),
-                       lambda f: setattr(f, "protection", None), lambda f: setattr(f, "fail", "graphql")):
+        for change in (lambda f: f.branch_summary.update(name="other"),
+                       lambda f: f.branch_summary.update(protected=False),
+                       lambda f: f.branch_summary["protection"].update(enabled=False),
+                       lambda f: f.branch_summary["protection"]["required_status_checks"].update(enforcement_level="non_admins"),
+                       lambda f: f.branch_summary["protection"]["required_status_checks"].update(checks=[]),
+                       lambda f: f.branch_summary["protection"]["required_status_checks"]["checks"][0].update(app_id=99),
+                       lambda f: f.branch_summary.pop("protection"),
+                       lambda f: setattr(f, "branch_summary", None), lambda f: setattr(f, "fail", "/branches/main")):
             fixture = Fixture()
             change(fixture)
             result = fixture.control()

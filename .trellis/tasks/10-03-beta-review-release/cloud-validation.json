@@ -100,6 +100,23 @@
       "verify": "failure",
       "publish": "skipped",
       "cause": "positive concurrency fixture imposes 1s runner throughput assumption including SQLite writes; production default lookup budget is 20s"
+    },
+    {
+      "id": 37074314019,
+      "head": "c12b7e60c7d82934173695064d054de6fb4cf635",
+      "conclusion": "success",
+      "build-amd64": {
+        "startup": "success",
+        "migrations": 105,
+        "adapter_tests": 34
+      },
+      "build-arm64": {
+        "startup": "success",
+        "migrations": 105,
+        "adapter_tests": 34
+      },
+      "verify": "success",
+      "publish": "success"
     }
   ],
   "linux_fixture_fix": {
@@ -192,19 +209,6 @@
       }
     }
   ],
-  "conditional_candidate": {
-    "pr": 11,
-    "head": "9fa79ae813f68c3a9ae4804f5b455ed03a08e032",
-    "beta_run": 37073109247,
-    "status": "failed; no merge/dispatch",
-    "controller_run": 37073595194,
-    "notify": true,
-    "bark": {
-      "status": "sent",
-      "attempts": 1,
-      "http_status": 200
-    }
-  },
   "batch_fixture_fix": {
     "files": [
       "tests/test_adapter.py"
@@ -216,5 +220,61 @@
     "serialized_mutation": "single worker returns fifty results within bounded budget but both providers correctly fail peak>1; 4.689s total",
     "linux_arm64_packaged_suite": "34/34 in 13.603s; /app module verified; network none; container removed",
     "review_focused": "batch/global-deadline/queue-cancel/slow-drip 5/5"
+  },
+  "conditional_candidates": [
+    {
+      "pr": 11,
+      "head": "9fa79ae813f68c3a9ae4804f5b455ed03a08e032",
+      "beta_run": 37073109247,
+      "status": "failed; no merge/dispatch",
+      "controller_run": 37073595194,
+      "notify": true,
+      "bark": {
+        "status": "sent",
+        "attempts": 1,
+        "http_status": 200
+      }
+    },
+    {
+      "pr": 11,
+      "head": "c12b7e60c7d82934173695064d054de6fb4cf635",
+      "beta_run": 37074314019,
+      "status": "beta success; default-token branch-protection metadata read failed closed; no merge/dispatch",
+      "beta_registry": {
+        "georelay": "sha256:35f57d456da5076d3230dd52a7961eb1a8307152031e849da9cb288d86a7102e",
+        "georelay-adapter": "sha256:6bebfb847ddaee21c4aecac3e65b6f096a05aa0b0eaec4f5c941b2ecfd3ca9d9",
+        "alias": "exact beta-pr-11",
+        "latest": "unchanged main5727 indexes; child/config/OCI/two arches passed"
+      },
+      "controller_run": 37074994812,
+      "controller_reason": "branch_protection",
+      "bark": {
+        "status": "sent",
+        "attempts": 1,
+        "http_status": 200
+      }
+    }
+  ],
+  "protection_capability_probe": {
+    "run": 37076000025,
+    "branch": "qa/georelay-protection-probe-37074994812",
+    "sha": "211de68bcd05ad41c3919aab8a123f61b5e4caf9",
+    "permissions": "same as default-token controller",
+    "operations": "only GET and GraphQL query; intentionally check-only, no images/artifacts/publication",
+    "branch_summary": {
+      "protected": true,
+      "enabled": true,
+      "enforcement_level": "everyone",
+      "verify_app": 15368
+    },
+    "required_status_checks_detail": "HTTP403",
+    "graphql_full_and_four_fields": "FORBIDDEN at repository.ref.branchProtectionRule",
+    "active_branch_rules": [],
+    "control_run": 37076023220,
+    "notify": false,
+    "bark_step": "skipped",
+    "owner_live_readback": "main strict=true/enforce_admins=true/verify app15368; settings unchanged",
+    "decision": "use accessible branch protection summary and ordinary expected-head merge; existing strict checks are enforced atomically by GitHub; no administrator credential or bypass",
+    "temporary_resources": "remote/local branch deleted; worktree removed; absence verified"
   }
 }

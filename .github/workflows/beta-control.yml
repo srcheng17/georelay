@@ -19,7 +19,7 @@ jobs:
     runs-on: ubuntu-latest
     timeout-minutes: 15
     permissions:
-      # Also read main's protection rule through a read-only GraphQL query.
+      # Read main's public protection summary; GitHub enforces strict checks at merge.
       # No administration permission or bypass token is requested.
       contents: write
       actions: write
