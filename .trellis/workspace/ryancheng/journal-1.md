@@ -487,3 +487,25 @@ Reduced brand patch production footprint from 27 files to 7; preserved internal 
 ### Next Steps
 
 - Review enhanced-hedgehog; cloud amd64/arm64 CI awaits a future push or PR. Separate main-image startup task remains on its agent branch.
+
+
+## Session 16: Restrict upstream integration to address patches
+<!-- trellis-session: v=2 fp=06c4a4200b3e12f4 -->
+
+**Date**: 2026-10-03
+**Task**: Restrict upstream integration to address patches
+**Branch**: `enhanced-hedgehog`
+
+### Summary
+
+Removed upstream branding edits and legal/visual snapshot gates; only two address patches touch three production files. GeoRelay repository/image names retained, TeslaMate UI/files pass through unchanged. Python 87/87 and isolated address ExUnit 130 passed, independent review clean. Native amd64/arm64 CI is the remaining merge gate under current push-and-merge authorization; separate startup smoke branch excluded.
+
+### Git Commits
+
+| Hash | Message |
+|------|---------|
+| `34f8b31` | build: restrict upstream integration to address patches |
+
+### Status
+
+[OK] **Completed**
