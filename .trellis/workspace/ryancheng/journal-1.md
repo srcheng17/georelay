@@ -105,3 +105,37 @@ Implemented and verified mainland AMap / overseas OSM sidecar and fixed-release 
 ### Next Steps
 
 - 历史OSM字段差异和旧正身份迁移仍须独立评估，未部署
+
+
+## Session 4: 公开仓库与 README 整理
+<!-- trellis-session: v=2 fp=831b546c98764bfd -->
+
+**Date**: 2026-10-02
+**Task**: 公开仓库与 README 整理
+**Branch**: `feat/amap-adapter`
+
+### Summary
+
+按授权公开仓库并回读main保护；保留官方README结构，补充高德能力与独立配置指南，来源许可及公开内容审查通过。
+
+### Main Changes
+
+- README保留官方功能、截图、许可与致谢，新增能力与docs/AMAP.md一致；main要求PR和verify、base同步，禁强推及删除。
+
+### Git Commits
+
+| Hash | Message |
+|------|---------|
+| `1482e5894834c8459bd5ec862a98058b90adbd7d` | docs: present AMap integration with upstream project overview |
+
+### Testing
+
+- [OK] 30条相对链接/锚点、22个仪表盘锚点、3张固定commit截图、敏感信息审查及diff检查通过。
+
+### Status
+
+[OK] **Completed**
+
+### Next Steps
+
+- 推送最终提交并核对PR CI；未合并、发布或部署。
