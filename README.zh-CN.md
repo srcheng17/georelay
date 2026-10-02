@@ -10,17 +10,54 @@
 
 ## 开始使用
 
-需要运行本仓库构建的补丁版 TeslaMate 和独立高德适配器。官方镜像不支持本项目新增的 `NOMINATIM_BASE_URL`。
+先构建下面的两个镜像，再往现有 TeslaMate stack 添加 `amap-adapter`，并修改 `teslamate` 的镜像和地址服务 URL。官方镜像不支持 `NOMINATIM_BASE_URL`，需要换成本仓库的补丁镜像。
 
-1. 按[源码构建步骤](docs/AMAP.md#开发与构建)生成 TeslaMate 和适配器镜像。
-2. 为适配器设置高德 Web 服务 Key，以及包含应用名和联系方式的 Nominatim User-Agent。[配置指南](docs/AMAP.md#配置)中提供了适配器的 Compose 示例。
-3. 将两个服务接入同一个 Docker 网络，在补丁版 TeslaMate 中设置：
+<details>
+<summary>从源码构建镜像</summary>
 
-   ```dotenv
-   NOMINATIM_BASE_URL=http://amap-adapter:8080
-   ```
+目前没有发布可直接拉取的预构建镜像。在仓库根目录执行以下命令，生成示例使用的本地镜像标签。目标目录 `/tmp/teslamate-amap-build` 必须不存在或为空。
 
-适配器的数据卷需要在重启和升级时保留，其中存有永久地址身份和响应缓存。替换现有环境前，请先阅读[备份与旧地址兼容说明](docs/AMAP.md#永久身份与备份)。
+```sh
+python3 scripts/prepare_upstream.py /tmp/teslamate-amap-build
+docker build -t teslamate-amap:local /tmp/teslamate-amap-build
+docker build -t amap-adapter:local adapter
+```
+
+</details>
+
+在现有 stack 的 `.env` 中设置 `AMAP_KEY` 和 `NOMINATIM_USER_AGENT`：前者是高德 Web 服务 Key，后者包含应用名和实际联系方式，格式参考 [.env.example](.env.example)。
+
+把下面的片段并入已有 Compose 配置，保留其他 TeslaMate 环境变量、数据库、MQTT、Grafana 服务以及原有卷。
+
+```yaml
+services:
+  teslamate:
+    image: teslamate-amap:local
+    environment:
+      NOMINATIM_BASE_URL: http://amap-adapter:8080
+      # Keep your other TeslaMate settings here.
+  amap-adapter:
+    image: amap-adapter:local
+    restart: unless-stopped
+    environment:
+      AMAP_KEY: "${AMAP_KEY:?Set AMAP_KEY in .env}"
+      NOMINATIM_USER_AGENT: "${NOMINATIM_USER_AGENT:?Set NOMINATIM_USER_AGENT in .env}"
+    volumes:
+      - amap-data:/data
+    read_only: true
+    tmpfs:
+      - /tmp:size=16m,mode=1777
+    cap_drop:
+      - ALL
+    security_opt:
+      - no-new-privileges:true
+volumes:
+  amap-data:
+```
+
+Compose 默认网络可以让两个服务互通。如果 TeslaMate 使用自定义网络，把适配器加入同一网络，并保留访问高德和 OSM 的外网出口。适配器无需映射主机端口。
+
+重启和升级时保留 `amap-data`，其中存有永久地址身份和响应缓存。替换现有环境前，请阅读[备份与旧地址兼容说明](docs/AMAP.md#永久身份与备份)。其他选项见[配置指南](docs/AMAP.md#配置)。
 
 ## 功能
 

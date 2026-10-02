@@ -10,17 +10,54 @@ AMap place names and addresses for your self-hosted [TeslaMate](https://github.c
 
 ## Getting started
 
-Run the patched TeslaMate image built from this repository alongside the address adapter. The official TeslaMate image does not support this project's `NOMINATIM_BASE_URL` setting.
+Build the two images below, then add `amap-adapter` to your existing TeslaMate stack and update the `teslamate` image and URL. The official TeslaMate image does not support `NOMINATIM_BASE_URL`, so it needs to be replaced with the patched image.
 
-1. Build both images using the [source build instructions (Chinese)](docs/AMAP.md#开发与构建).
-2. Configure the adapter with an AMap Web Service API key and a Nominatim User-Agent containing your application name and contact information. The [configuration guide (Chinese)](docs/AMAP.md#配置) includes the adapter Compose example.
-3. Connect both services to the same Docker network and set this variable on the patched TeslaMate service:
+<details>
+<summary>Build the images from source</summary>
 
-   ```dotenv
-   NOMINATIM_BASE_URL=http://amap-adapter:8080
-   ```
+No prebuilt images are published yet. Run these commands from the repository root to create the local image tags used in the example. The target directory `/tmp/teslamate-amap-build` must not exist or must be empty.
 
-Keep the adapter's data volume across restarts and upgrades. It stores persistent address identities as well as cached responses. Read the [backup and existing-address compatibility notes (Chinese)](docs/AMAP.md#永久身份与备份) before replacing an existing setup.
+```sh
+python3 scripts/prepare_upstream.py /tmp/teslamate-amap-build
+docker build -t teslamate-amap:local /tmp/teslamate-amap-build
+docker build -t amap-adapter:local adapter
+```
+
+</details>
+
+Set `AMAP_KEY` and `NOMINATIM_USER_AGENT` in your stack's `.env`. Use an AMap Web Service API key and a User-Agent containing your application name and contact information; see [.env.example](.env.example) for the format.
+
+Merge this fragment into your existing Compose configuration. Keep your other TeslaMate environment variables, database, MQTT and Grafana services, and existing volumes.
+
+```yaml
+services:
+  teslamate:
+    image: teslamate-amap:local
+    environment:
+      NOMINATIM_BASE_URL: http://amap-adapter:8080
+      # Keep your other TeslaMate settings here.
+  amap-adapter:
+    image: amap-adapter:local
+    restart: unless-stopped
+    environment:
+      AMAP_KEY: "${AMAP_KEY:?Set AMAP_KEY in .env}"
+      NOMINATIM_USER_AGENT: "${NOMINATIM_USER_AGENT:?Set NOMINATIM_USER_AGENT in .env}"
+    volumes:
+      - amap-data:/data
+    read_only: true
+    tmpfs:
+      - /tmp:size=16m,mode=1777
+    cap_drop:
+      - ALL
+    security_opt:
+      - no-new-privileges:true
+volumes:
+  amap-data:
+```
+
+Compose's default network lets the two services reach each other. If TeslaMate uses a custom network, add the adapter to that network and keep outbound access to AMap and OSM. The adapter does not need a host port.
+
+Keep `amap-data` across restarts and upgrades: it stores persistent address identities as well as cached responses. Read the [backup and existing-address compatibility notes (Chinese)](docs/AMAP.md#永久身份与备份) before replacing an existing setup. Additional settings are in the [configuration guide (Chinese)](docs/AMAP.md#配置).
 
 ## Features
 

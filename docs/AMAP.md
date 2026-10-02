@@ -89,9 +89,15 @@ NOMINATIM_BASE_URL=http://amap-adapter:8080
 
 ### Compose 示例
 
+#### 接入现有 stack
+
+现有 TeslaMate stack 的配置片段和镜像构建步骤见[开始使用](../README.zh-CN.md#开始使用)。需要新增 `amap-adapter`，同时将现有 TeslaMate 的 `image` 换成补丁镜像并设置 `NOMINATIM_BASE_URL`。保留其他环境变量、数据库、MQTT、Grafana 服务及原有卷；自定义网络下将适配器加入 TeslaMate 所在网络，并保留外网出口。
+
+#### 独立开发示例
+
 在仓库根目录参照 [.env.example](../.env.example) 准备本地 `.env`。填写 Key 和调用者标识，保留该文件在 Git 忽略范围内。示例通过 `AMAP_KEY` 传值；选择 `AMAP_KEY_FILE` 时，需在 Compose 中添加对应环境变量及只读文件挂载，并清空 `AMAP_KEY`。
 
-[compose.example.yaml](../compose.example.yaml) 仅运行 sidecar，可用于开发和后续部署审查：
+[compose.example.yaml](../compose.example.yaml) 仅运行适配器，用于独立开发和调试：
 
 ```sh
 docker compose -f compose.example.yaml config --quiet
