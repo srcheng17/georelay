@@ -139,3 +139,37 @@ Implemented and verified mainland AMap / overseas OSM sidecar and fixed-release 
 ### Next Steps
 
 - 推送最终提交并核对PR CI；未合并、发布或部署。
+
+
+## Session 5: README 文字与结构优化
+<!-- trellis-session: v=2 fp=0868b7f6de7a28ad -->
+
+**Date**: 2026-10-02
+**Task**: README 文字与结构优化
+**Branch**: `feat/amap-adapter`
+
+### Summary
+
+安装并使用Humanizer v3.0.0改写README，保留官方功能来源，移除固定版本定位和验收报告口吻。
+
+### Main Changes
+
+- README按地址功能、使用、官方功能与截图、版本维护组织；具体构建版本指向upstream.json，准确区分检测新版与自动构建。
+
+### Git Commits
+
+| Hash | Message |
+|------|---------|
+| `f8ad02d328fffd989d82b7151748930b26e821b7` | docs: simplify README structure and version guidance |
+
+### Testing
+
+- [OK] 23个相对链接/锚点、22面板链接、3固定截图、Markdown/JSON/diff及独立增量审查通过。
+
+### Status
+
+[OK] **Completed**
+
+### Next Steps
+
+- 推送当前功能分支，核对最终verify；不合并、发布或部署。
