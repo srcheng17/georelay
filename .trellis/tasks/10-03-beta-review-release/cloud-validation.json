@@ -32,6 +32,23 @@
       "publish": "skipped",
       "main_runtime": "not executed",
       "cause": "Linux E2BIG for large FAKE_BODY environment values in offline HTTP fixture; root reproduced both oversized cases in isolated Linux container"
+    },
+    {
+      "id": 37069337733,
+      "head": "fdb9375ca0e8e40175509c4eafaa09eb9d43aaad",
+      "conclusion": "success",
+      "build-amd64": {
+        "startup": "success",
+        "migrations": 105,
+        "adapter_tests": 34
+      },
+      "build-arm64": {
+        "startup": "success",
+        "migrations": 105,
+        "adapter_tests": 34
+      },
+      "verify": "success",
+      "publish": "success"
     }
   ],
   "linux_fixture_fix": {
@@ -43,5 +60,20 @@
     "mac_targeted": "12/12 in 24.301s",
     "linux_arm64_targeted": "12/12 in 52.495s; offline fixture, not real app startup",
     "oversized_ascii_and_unicode_regressions": "preserved and passed"
+  },
+  "beta_registry": {
+    "both_indexes": "exact amd64/arm64 with valid OCI revision/version/digests",
+    "beta-pr-10": "matches checked version",
+    "latest": "unchanged from before beta"
+  },
+  "bark_secret": {
+    "name": "BARK_URL",
+    "configured": true,
+    "verified": "GitHub secret name readback; HTTPS format validated without emitting endpoint/key"
+  },
+  "controller_api_fix": {
+    "cause": "GitHub run.name equals custom run-name; workflow.name is the logical workflow name",
+    "fix": "bind source to verified workflow id/path/name; keep strict display_title parsing",
+    "tests": "14/14; old guard fails with real-shape fixture; real apply=False now candidate_ready"
   }
 }

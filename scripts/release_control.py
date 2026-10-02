@@ -87,7 +87,7 @@ def control(repository, run_id, attempt, api=github, fetch=registry_document, ap
         title = RUN_TITLE.fullmatch(run.get("display_title", ""))
         if (run.get("id") != run_id or run.get("run_attempt") != attempt or run.get("status") != "completed"
                 or run.get("workflow_id") != workflow.get("id") or workflow.get("path") != ".github/workflows/ci.yml"
-                or run.get("name") != "Validate and build" or not title
+                or workflow.get("name") != "Validate and build" or not title
                 or run.get("repository", {}).get("full_name") != repository
                 or run.get("head_repository", {}).get("full_name") != repository):
             return report

@@ -24,10 +24,12 @@ IMAGE = "application/vnd.oci.image.manifest.v1+json"
 class Fixture:
     def __init__(self):
         self.run = {"id": 10, "run_attempt": 1, "status": "completed", "conclusion": "success", "workflow_id": 3,
-                    "name": "Validate and build", "event": "pull_request", "head_sha": HEAD, "head_branch": "feature",
+                    "event": "pull_request", "head_sha": HEAD, "head_branch": "feature",
                     "repository": {"full_name": REPO}, "head_repository": {"full_name": REPO},
                     "display_title": "images/pull_request/7/" + HEAD + "/publish/-",
                     "html_url": "https://github.com/" + REPO + "/actions/runs/10"}
+        self.run["name"] = self.run["display_title"]
+        self.workflow = {"id": 3, "name": "Validate and build", "path": ".github/workflows/ci.yml"}
         self.pull = {"number": 7, "state": "open", "draft": False, "merged": False, "merge_commit_sha": None,
                      "head": {"sha": HEAD, "ref": "feature", "repo": {"full_name": REPO}},
                      "base": {"ref": "main", "repo": {"full_name": REPO}}, "mergeable": True, "mergeable_state": "clean"}
@@ -71,7 +73,7 @@ class Fixture:
         if path == "/actions/runs/10":
             return copy.deepcopy(self.run)
         if path == "/actions/workflows/ci.yml":
-            return {"id": 3, "path": ".github/workflows/ci.yml"}
+            return copy.deepcopy(self.workflow)
         if path == "/pulls/7":
             self.pull_reads += 1
             if self.changed_on_last_read and self.pull_reads == 3:
@@ -146,6 +148,12 @@ class ReleaseControlTests(unittest.TestCase):
                 self.assertEqual(result["status"], "skipped")
                 self.assertFalse(result["notify"])
                 self.assertEqual(fixture.writes(), [])
+        fixture = Fixture()
+        fixture.workflow["name"] = "Unexpected workflow"
+        result = fixture.control()
+        self.assertEqual(result["status"], "skipped")
+        self.assertFalse(result["notify"])
+        self.assertEqual(fixture.writes(), [])
 
     def test_stale_draft_closed_fork_base_and_last_read_changes_skip(self):
         for edit in (lambda p: p.update(draft=True), lambda p: p.update(state="closed"),
