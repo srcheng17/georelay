@@ -133,6 +133,7 @@ Base：无账号/地图 Key 的新库启动并返回登录页面。Good：损坏
 - `python3 scripts/image_context.py [--json]`：绑定实际 checkout、PR head、channel/version/source_pr/expected_main_sha；PR 不使用临时 merge SHA。
 - `bash scripts/publish_images.sh <checked-artifacts-directory>`：消费相同已测试 amd64/arm64 artifacts，不重建。
 - `python3 scripts/release_control.py --output PATH [--apply]`：缺省只读；workflow 从 main 显式 apply。
+- `python3 scripts/release_control.py --main-failure --output PATH`：仅当前native main push/publish dispatch，从WORKFLOW_NEEDS生成只读正式失败report；不能与--apply组合。有效失败report返回0让后续dry/send执行，原控制器失败仍非零。
 - `python3 scripts/notify_bark.py --report PATH [--dry-run]`：仅可信失败 report；BARK_URL 只进发送步骤，不打印 endpoint/Key/响应原文。
 - CI run-name：`images/event/PR-or-0/tested-SHA/publish-or-check/expected-main-SHA-or--`。
 
@@ -143,7 +144,8 @@ Base：无账号/地图 Key 的新库启动并返回登录页面。Good：损坏
 - 成功候选必须同仓 open/non-draft、当前 head等于tested SHA、当前 main为head祖先；checks/build-amd64/build-arm64/verify/publish全成功，verify来自 Actions app15368和本run。两 beta索引各恰含linux/amd64、linux/arm64，manifest/config digest与OCI来源一致。
 - 只读GET /branches/main必须返回name=main、protected=true、protection.enabled=true、required_status_checks.enforcement_level=everyone，且verify唯一绑定Actions app15368；缺字段、读取失败或不符则拒绝merge。默认Actions token无法读取GraphQL branchProtectionRule或REST strict详情（实际FORBIDDEN/403），不新增管理员凭据。main现有strict verify/enforce_admins设置须保留，由GitHub普通merge端原子强制执行；控制器不声称独立读到了摘要未提供的strict标志。控制器不执行候选代码、不加载候选artifacts、不绕过保护；merge前再次回读head/base，普通REST merge携带expected head SHA，正常过期成功候选静默跳过。
 - merge响应丢失先回读，不重复merge；已合并回读后dispatch main，携带expected_main_sha/source_pr。main检出/测试SHA必须等于expected；GITHUB_TOKEN合并push不触发CI，显式dispatch负责正式发布。普通main成功run不递归dispatch。
-- 失败通知独立于成功合并门禁：可信beta早期失败无artifacts也通知；main失败可关联已closed/merged PR，expected与actual不一致的失败仍通知。fork/check-only/metadata-only/正常过期成功候选不通知。metadata-only以本run checks中的精确step名 Python checks for metadata-only changes 已执行且非skipped来证明；CI用always()+image_required=false保证前序失败后仍执行。不得仅按build/publish skipped判轻量，因为镜像早期失败也可能跳过。仅固定阶段、SHA、PR/run链接和允许的job名进入payload。
+- main CI的always收尾job拥有正式失败通知（包含publisher job超时/checkout失败），不能依赖GITHUB_TOKEN dispatch后的workflow_run继续触发：真实bot run完成后未出现observer，而human push/dispatch正常触发。收尾先执行纯布尔通知判断，使beta的该job也是success，兼容all-job成功门禁；只有main publish、非metadata-only且verify/publish未成功时才接触Bark Secret。stable控制器不再发送main通知，避免人工run双发；成功/轻量/check-only/fork仅无Secret判断。
+- 失败通知独立于成功合并门禁：可信beta早期失败无artifacts也通知；main只读report以actual main merge SHA回读关联已closed/merged同仓PR；关联读取失败/不符保留PR0基本通知，valid expected与actual不一致的失败仍通知。fork/check-only/metadata-only/正常过期成功候选不通知。metadata-only以本run checks中的精确step名 Python checks for metadata-only changes 已执行且非skipped来证明；CI用always()+image_required=false保证前序失败后仍执行。不得仅按build/publish skipped判轻量，因为镜像早期失败也可能跳过。仅固定阶段、SHA、PR/run链接和允许的job名进入payload。
 - Bark先dry-run，HTTP仅loopback测试可用；真实URL须HTTPS，禁止redirect。有界timeout/retry/backoff，2xx且JSON code200才算送达；缺Secret明确not_configured，terminal uncertain不得盲目再发。稳定key不保证Bark服务端去重，跨workflow重跑可能重复。
 
 ### 4. Validation & Error Matrix
@@ -164,7 +166,7 @@ Base：同仓PR完整双架构验证后只生成beta。Good：当前候选经可
 
 ### 6. Tests Required
 
-标准库 fixtures覆盖source SHA/channel、fork/dispatch、stable/beta/latest隔离、同artifact发布、registry digest/OCI、成功/陈旧/保护拒绝、merge读回/dispatch不确定、beta无产物与closed main失败；保护读取后head变化时必须由expected-SHA merge拒绝，断言单次merge、PR未合并、零dispatch及merge失败通知。镜像内 slow-drip HTTP 回归的总预算包括 Python 启动/import；模拟滴流时长须长于有界预算，保留请求确实到达、504 与总时限断言，禁止以删断言或重跑套件掩盖时序失败。批量成功回归使用合理有界预算，并以50项完整结果/顺序/身份及peak并发大于1且不超过4验证行为；不依赖runner必须在1秒内完成50次缓存读写。全局deadline失败与排队取消回归保留。Bark真实loopback验证POST、dry-run零网络、响应/重试/脱敏。主镜像实际启动和adapter packaged suite单独留证，云端两native job及真实Bark未取得时明确待验证。
+标准库 fixtures覆盖source SHA/channel、fork/dispatch、stable/beta/latest隔离、同artifact发布、registry digest/OCI、成功/陈旧/保护拒绝、merge读回/dispatch不确定、beta无产物与closed main失败；current-main只读report覆盖invalid/fork/check-only/metadata/success零通知、stale expected诊断、PR读取失效降级和stable observer提前退出防双发，实际CI通知布尔门控覆盖beta/no-op job success与main早期失败。保护读取后head变化时必须由expected-SHA merge拒绝，断言单次merge、PR未合并、零dispatch及merge失败通知。镜像内 slow-drip HTTP 回归的总预算包括 Python 启动/import；模拟滴流时长须长于有界预算，保留请求确实到达、504 与总时限断言，禁止以删断言或重跑套件掩盖时序失败。批量成功回归使用合理有界预算，并以50项完整结果/顺序/身份及peak并发大于1且不超过4验证行为；不依赖runner必须在1秒内完成50次缓存读写。全局deadline失败与排队取消回归保留。Bark真实loopback验证POST、dry-run零网络、响应/重试/脱敏。主镜像实际启动和adapter packaged suite单独留证，云端两native job及真实Bark未取得时明确待验证。
 
 ### 7. Wrong vs Correct
 

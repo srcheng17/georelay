@@ -1,6 +1,6 @@
 # Beta 发布链路验证记录
 
-当前云端进度见文末及 [cloud-validation.json](cloud-validation.json)；前面的本地/bootstrap记录按当时状态保留，不能作为当前未完成项列表。
+最终状态：PR12 已由 GitHub Actions bot 自动合并；自动 main dispatch37079115614 的双架构实际启动/105迁移/adapter34、verify、公版与 latest 均通过。完整证据见文末及 [cloud-validation.json](cloud-validation.json)。前面的本地/bootstrap记录按当时状态保留，不能作为当前未完成项列表。
 
 最新状态：用户已明确授权“合并，验证”。main c8a6e83（PR9）已整合，保留地址-only共享prepare与原Dockerfile；启动门禁已移除品牌/法律端点检查。整合后的完整130/130通过（85.830秒），Trellis复核通过。下面旧arm64三补丁/品牌镜像结果仅为历史验证；本次最终镜像以新PR云端native amd64/arm64结果为准，不能复用旧镜像声明整合启动成功。云端结果将记录在cloud-validation.json。
 
@@ -97,3 +97,21 @@ The default-token controller on old main still used the forbidden GraphQL rule q
 Late-base regression uses the existing controller fixture: main moves after the protection summary while PR head remains tested. Without the simulated server strict rejection the test observed an unwanted dispatch and failed; with ordinary merge rejection it passed (one exact-head PUT, PR open/unmerged, no dispatch, merge failure notification). Independent controller+Bark22/22, AST/JSON/diff passed. Only fixture/test changed; no production controller, workflow or protection settings changed. Real default-token automatic acceptance remains pending.
 
 Main installer run37077752055 at02c4262 completed successfully: both native main runtime/adapter suites and verify/publication passed. Both stable indexes/child/config digests/OCI labels were verified; each latest exactly matched v4.3.0-georelay-02c426233bd972506f5149810afa96fab6388fb3. This was the installer’s user merge/push run; automatic merge/dispatch remains a separate pending acceptance.
+
+## Final automatic acceptance (2026-10-03)
+
+PR12 exact head64074c219810b581bd8334b142ba0d1a25346d3c passed beta37078535617 on native amd64 and arm64: default release startup, login HTTP200, 105 migrations, core tables, compiled address contract and packaged adapter34/34. Both fixed beta indexes/child/config size+digests/OCI labels and beta-pr-12 were verified, with latest unchanged at main02c.
+
+Installed main controller37079096065 returned merged_dispatched/main_publication_requested/notify=false. GitHub independently confirmed PR12 merged by github-actions[bot] to0d1be28afe08d0fd43dc028c207d76c7a826d538, and explicit workflow_dispatch37079115614 bound source_pr12 plus expected/actual mergeSHA. No manual candidate merge/dispatch was used for this acceptance. Success Bark was skipped.
+
+That automatic main run completed both native default-startup checks: HTTP200 login HTML, 105 migrations, core tables and compiled addresses. Packaged adapter34/34 passed in15.099s amd64 and14.931s arm64; verify and publish succeeded. Both formal version indexes and latest exactly matched v4.3.0-georelay-0d1be28afe08d0fd43dc028c207d76c7a826d538; complete child/config size+digest/OCI checks passed. Owner readback after automatic merge still confirmed strict=true/enforce_admins=true/verify app15368 and current main0d1be28. This owner readback is distinct from the controller’s readable summary, which has no strict field.
+
+Runtime/publication/automatic-merge acceptance passed; automatic-main failure notification trigger is now under investigation because its downstream workflow_run observer did not appear. The following requirements have implementation/local coverage, with formal failure delivery not yet accepted: exact-source beta/stable channels, two native runtime suites before save/publication, reuse of checked artifacts, current-head ordinary protected auto merge and explicit dispatch, real failure Bark API acceptance plus mock main-failure/closed-PR coverage, publisher/updater/retention/spec/document consistency, and final cloud proof. The late-base rejection is a unit simulation of GitHub strict behavior; it is not reported as a live raced-main experiment. Bark API code200 acceptance is not independent handset receipt. No running container or production data was changed; all temporary probe/failure resources were removed.
+
+## Automatic-main failure notification correction (2026-10-03)
+
+The successful bot main dispatch37079115614 produced no observer at least6m39s after completion. Human main push37077752055 and human check-only dispatch37076000025 each produced an observer in2s. Default workflow remains active with unchanged trigger/name. This is consistent with documented GITHUB_TOKEN event suppression; there is no API suppression reason and no established excess of the documented workflow_run chain limit. Formal failure notification could not be accepted from mock observer tests.
+
+The correction uses one always CI finalizer: native boolean decision always succeeds for beta/no-op, and only main image publication failure loads checked main code and readonly report, then existing Bark dry-run/verified send. Dry-run uses a fixed placeholder without a Secret; only real sender sees BARK_URL. Optional PR GET matches actual main merge SHA/repository/ref/merged facts, else basic PR0 run notification persists; valid expected SHA still diagnoses stale dispatch. Stable observer relinquishes main notification before PR API reads, preventing duplicate or late API-error notification. Publisher hard timeout and checkout failure are covered by the independent job; forced whole-run termination still depends on platform scheduling. Targeted controller23/Bark6/context5/CI7, AST/actionlint/diff passed; independent full suite and actual bot failure/zero-publication acceptance remain pending.
+
+Independent final review of the correction passed the full suite139/139 in88.019s and actionlint v1.7.12(-shellcheck=), AST, JSON/diff checks; no code/design blocker. No static typechecker is configured. The report/notification path is still pending real bot-failure cloud acceptance, despite earlier successful image publication.

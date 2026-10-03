@@ -134,6 +134,25 @@
       },
       "verify": "success",
       "publish": "success"
+    },
+    {
+      "id": 37078535617,
+      "head": "64074c219810b581bd8334b142ba0d1a25346d3c",
+      "conclusion": "success",
+      "build-amd64": {
+        "startup": "success",
+        "migrations": 105,
+        "adapter_tests": 34,
+        "adapter_seconds": 15.33
+      },
+      "build-arm64": {
+        "startup": "success",
+        "migrations": 105,
+        "adapter_tests": 34,
+        "adapter_seconds": 15.278
+      },
+      "verify": "success",
+      "publish": "success"
     }
   ],
   "linux_fixture_fix": {
@@ -248,6 +267,34 @@
         "georelay-adapter": "sha256:711c5a2fbe744a521a3d4e0053204befdbdea28f0dbf6c57811264e6609c4b17",
         "latest": "both exact version indexes; amd64/arm64 and child/config/OCI/digests passed"
       }
+    },
+    {
+      "id": 37079115614,
+      "head": "0d1be28afe08d0fd43dc028c207d76c7a826d538",
+      "event": "workflow_dispatch",
+      "source_pr": 12,
+      "expected_main_sha": "0d1be28afe08d0fd43dc028c207d76c7a826d538",
+      "conclusion": "success",
+      "build-amd64": {
+        "startup": "success",
+        "migrations": 105,
+        "adapter_tests": 34,
+        "adapter_seconds": 15.099
+      },
+      "build-arm64": {
+        "startup": "success",
+        "migrations": 105,
+        "adapter_tests": 34,
+        "adapter_seconds": 14.931
+      },
+      "verify": "success",
+      "publish": "success",
+      "registry": {
+        "version": "v4.3.0-georelay-0d1be28afe08d0fd43dc028c207d76c7a826d538",
+        "georelay": "sha256:0957ca05ab40fcdd5313ead104fb2a82595fcea7b89f189bd4956e0b59d6bf06",
+        "georelay-adapter": "sha256:c8240075d2a3eef8a0e173799ffce2365e16a610959876eb905a6696887f38b5",
+        "latest": "both exact version indexes; amd64/arm64 and child/config size+digests/OCI passed"
+      }
     }
   ],
   "batch_fixture_fix": {
@@ -337,7 +384,7 @@
       "main_run": 37077752055,
       "main_result": "success; both native startups/105 migrations/adapter34; stable indexes and latest verified"
     },
-    "default_token_auto_merge_dispatch": "pending subsequent exact-head candidate; installer merge is not automatic acceptance",
+    "default_token_auto_merge_dispatch": "verified by controller37079096065, PR12 bot merge and explicit main dispatch37079115614",
     "old_controller": {
       "run": 37077616554,
       "status": "failed",
@@ -359,6 +406,73 @@
     "before": "without strict fixture rejection, regression failed because controller dispatched main",
     "after": "single exact-head PUT, PR open/unmerged, no dispatch, merge-stage failure notification; controller+Bark22/22; AST/JSON/diff passed",
     "production_changes": "none",
-    "live_default_token_acceptance": "pending"
+    "live_default_token_acceptance": "PR12 exact head beta success; installed controller auto merge and main dispatch success; the late-base rejection remains a unit simulation, not a live base-race experiment"
+  },
+  "automatic_acceptance": {
+    "pr": 12,
+    "head": "64074c219810b581bd8334b142ba0d1a25346d3c",
+    "beta_run": 37078535617,
+    "beta_registry": {
+      "version": "v4.3.0-georelay-beta-64074c219810b581bd8334b142ba0d1a25346d3c",
+      "georelay": "sha256:c16611ade36765ad09fad589f44e9289a4d201464b868bbbadd03ac660f723c5",
+      "georelay-adapter": "sha256:42f51321958f1b4bd43784013f57e33319368ef5151e0fac492c49c53ef9f071",
+      "alias": "beta-pr-12 exact indexes",
+      "latest_before_main_publication": "unchanged main02c indexes",
+      "verification": "two arches; child/config size and digests; OCI source/revision/version verified"
+    },
+    "controller_run": 37079096065,
+    "controller_status": "merged_dispatched",
+    "controller_reason": "main_publication_requested",
+    "notify": false,
+    "bark_step": "skipped",
+    "merged_by": "github-actions[bot]",
+    "merge_sha": "0d1be28afe08d0fd43dc028c207d76c7a826d538",
+    "main_dispatch_run": 37079115614,
+    "event": "workflow_dispatch",
+    "source_pr": 12,
+    "expected_main_sha": "0d1be28afe08d0fd43dc028c207d76c7a826d538",
+    "actual_head_sha": "0d1be28afe08d0fd43dc028c207d76c7a826d538",
+    "manual_mutations": "none for this candidate merge/dispatch; performed by installed main workflow GITHUB_TOKEN",
+    "owner_protection_readback": {
+      "strict": true,
+      "enforce_admins": true,
+      "verify_app": 15368,
+      "main_sha": "0d1be28afe08d0fd43dc028c207d76c7a826d538"
+    },
+    "main_observer": "no downstream workflow_run observed after bot dispatch; do not claim main-failure delivery coverage from source success"
+  },
+  "final_status": {
+    "all_acceptance_criteria": "automatic merge/dispatch, native runtime and stable/latest passed; automatic-main failure notification trigger under investigation",
+    "main_sha": "0d1be28afe08d0fd43dc028c207d76c7a826d538",
+    "bark": "BARK_URL configured; actual failure sender dry-run/sent/one attempt/HTTP200/code200 verified; handset receipt not independently verified",
+    "deployment_scope": "GHCR stable/latest only; running containers and production data unchanged",
+    "temporary_probe_resources": "all removed; absence verified"
+  },
+  "automatic_main_notification_gap": {
+    "source_run": 37079115614,
+    "completed": "2026-10-02T23:53:16Z",
+    "observer": "absent at least6m39s after completion; default workflow active/config unchanged",
+    "source_actor": "github-actions[bot]",
+    "working_comparisons": [
+      {
+        "source": 37077752055,
+        "event": "human push",
+        "observer": 37078384525,
+        "delay_seconds": 2
+      },
+      {
+        "source": 37076000025,
+        "event": "human workflow_dispatch",
+        "observer": 37076023220,
+        "delay_seconds": 2
+      }
+    ],
+    "explanation": "consistent with documented GITHUB_TOKEN event recursion suppression; API supplies no suppression reason; three-level workflow_run excess not established",
+    "official_source": "https://docs.github.com/en/actions/how-tos/writing-workflows/choosing-when-your-workflow-runs/triggering-a-workflow",
+    "correction": "main CI always finalizer owns notification, beta/no-op decision succeeds; readonly main_failure report; stable observer skips before PR API to prevent duplicate; existing Bark sender unchanged",
+    "targeted_checks": "controller23/Bark6/context5/ci_changes7; AST/actionlint -shellcheck=/diff passed",
+    "full_suite": "independent139/139 in88.019s; actionlint -shellcheck=/AST/diff passed; no review blockers",
+    "live_bot_failure": "pending new candidate/main and controlled stale-SHA dispatch; do not declare accepted yet",
+    "platform_limit": "forced whole-run termination still depends on GitHub scheduling finalizer"
   }
 }

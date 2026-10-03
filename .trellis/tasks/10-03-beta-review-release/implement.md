@@ -7,7 +7,7 @@
 - [x] 启动子任务已有默认入口/临时 PG/HTTP/迁移/取消清理实现，本机 arm64 实证与离线检查已完成，保留代码与证据。
 - [x] 用户回复“开始”批准本次收敛后的最终规划摘要，父任务已转 in_progress；现有子任务实施授权不扩展为 bootstrap PR 合并授权。
 - [x] 开始前加载 PRD/design、backend specs 与三份 research；使用 feat/beta-review-release。本次开发不手工合并 main；未来可信控制器按已授权条件合并其他候选。
-- [ ] GitHub BARK_URL 配置/hosted runner 可达性是实际 delivery 依赖；缺少 Secret 不阻止 mock/dry-run。
+- [x] GitHub BARK_URL 配置/hosted runner 可达性是实际 delivery 依赖；缺少 Secret 不阻止 mock/dry-run。
 
 ## 实施顺序
 
@@ -22,7 +22,7 @@
 
 - [x] 完整 unittest、git diff --check、相关 Bash/Python/Elixir 语法与 actionlint。
 - [x] 最终镜像实际 adapter/address/登录表单闭环；复用启动证据，但新增运行断言必须实际执行。所有测试无生产资源/真实 Key。
-- [ ] native amd64/arm64 PR checks、verify、beta 与双索引实际结果；mock/本机不替代云端。
+- [x] native amd64/arm64 PR checks、verify、beta 与双索引实际结果；mock/本机不替代云端。
 - [x] Bark dry-run/模拟接收及脱敏/失败 gating；Secret/工作流生效后才报告真实 delivery。
 - [x] current head 才能 merge；main dispatch expected SHA/current main 防陈旧；main 失败通知无需 open PR。正常稳定 run 不递归派发。
 - [x] stable/latest 未被 beta 改写，retention 回归确认 beta 不挤占正式十组。
@@ -35,3 +35,10 @@
 最终本地结果：131/131、实际arm64整链及故障/TERM通过、Trellis全域审查通过；完整证据与云端/真实Bark待验收边界见validation.md。
 
 2026-10-03最终整合：用户明确回复“合并，验证”，已授权本次bootstrap分支/PR合入并验证GHCR。整合main c8a6e83（PR9）地址-only修改，保留共享prepare、两个地址补丁与原生Dockerfile；删除品牌词/法律端点额外门禁，以真实登录表单、迁移和compiled地址RPC验收。旧品牌镜像测试记录仅为历史结果；最终以本次云端运行结果为准。
+
+## Automatic-main failure notification correction
+
+1. Add one always main-CI finalizer after checks/build/verify/publish; first perform a native boolean notification decision for every run so beta finalizer succeeds without Secret access. Notify only main image publication failures; preserve metadata/check-only/fork exclusions.
+2. Reuse release_control readonly report + existing Bark sender; confirm source PR against actual merged main when readable, otherwise preserve basic run notification. Do not add credentials/dependencies or alter runtime checks. Stable workflow_run observer relinquishes main notifications to avoid duplication.
+3. Reproduce absent-bot-observer boundary in tests, validate report/condition/ownership and controller/Bark regressions/actionlint. Push same-task candidate and verify beta + installed controller ordinary auto merge/dispatch + final stable/latest.
+4. Use isolated check-only probe branch’s GITHUB_TOKEN to dispatch main with a valid stale expected SHA, proving early failure blocks build/artifacts/publication and CI finalizer sends one verified Bark. Remove probe resources and verify latest unchanged. Only then finish/archive.

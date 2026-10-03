@@ -1,5 +1,5 @@
 #!/usr/bin/env python3
-"""Trusted-main observer for tested beta merges and failed GHCR publications."""
+"""Control tested beta merges and report current-main GHCR failures."""
 
 import argparse
 import base64
@@ -72,6 +72,46 @@ def verify_beta(repository, revision, version, fetch=registry_document):
                 raise ValueError("Beta OCI source mismatch")
 
 
+def main_failure(event, environment, needs, api=github):
+    """Report this main run's failure; optional PR reads cannot prevent delivery."""
+    repository = environment["GITHUB_REPOSITORY"]
+    revision = environment["GITHUB_SHA"]
+    run_id, attempt = int(environment["GITHUB_RUN_ID"]), int(environment["GITHUB_RUN_ATTEMPT"])
+    event_name = environment["GITHUB_EVENT_NAME"]
+    if (environment.get("GITHUB_REF") != "refs/heads/main" or event_name not in {"push", "workflow_dispatch"}
+            or not re.fullmatch(r"[A-Za-z0-9_.-]+/[A-Za-z0-9_.-]+", repository)
+            or event["repository"]["full_name"] != repository or not re.fullmatch(r"[0-9a-f]{40}", revision)
+            or run_id < 1 or attempt < 1):
+        raise ValueError("Invalid main failure source")
+    inputs = event.get("inputs", {}) if event_name == "workflow_dispatch" else {}
+    report = {"status": "skipped", "reason": "no_main_publication_failure", "notify": False}
+    if ((event_name != "push" and inputs.get("publish") not in (True, "true"))
+            or needs["checks"].get("outputs", {}).get("image_required") == "false"
+            or (needs["verify"]["result"] == "success" and needs["publish"]["result"] == "success")):
+        return report
+    failed_jobs = sorted(name for name in ("checks", "verify", "publish")
+                         if needs[name]["result"] in {"failure", "cancelled"})
+    notice = {"repository": repository, "run_id": run_id, "attempt": attempt, "source_pr": 0,
+              "sha": revision, "run_url": "https://github.com/" + repository + "/actions/runs/" + str(run_id),
+              "stage": "main_publication", "failed_jobs": failed_jobs,
+              "conclusion": "cancelled" if failed_jobs and all(needs[name]["result"] == "cancelled" for name in failed_jobs) else "failure"}
+    expected = inputs.get("expected_main_sha")
+    if isinstance(expected, str) and re.fullmatch(r"[0-9a-f]{40}", expected):
+        notice["expected_main_sha"] = expected
+    pull_number = inputs.get("source_pr", "")
+    if isinstance(pull_number, str) and re.fullmatch(r"[1-9]\d*", pull_number):
+        try:
+            pull_number = int(pull_number)
+            pull = api("GET", "repos/" + repository + "/pulls/" + str(pull_number))
+            if (pull.get("number") == pull_number and pull.get("merged") is True and pull.get("merge_commit_sha") == revision
+                    and pull.get("head", {}).get("repo", {}).get("full_name") == repository
+                    and pull.get("base", {}).get("repo", {}).get("full_name") == repository and pull["base"].get("ref") == "main"):
+                notice["source_pr"] = pull_number
+        except (OSError, RuntimeError, ValueError, KeyError, TypeError, AttributeError, subprocess.SubprocessError):
+            pass  # Keep the basic run notification when PR association is unavailable.
+    return dict(report, status="failed", reason="main_publication", notify=True, notification=notice)
+
+
 def control(repository, run_id, attempt, api=github, fetch=registry_document, apply=False, sleep=time.sleep):
     """Read-only by default. Only a fully checked, current beta can mutate GitHub."""
     if (not re.fullmatch(r"[A-Za-z0-9_.-]+/[A-Za-z0-9_.-]+", repository) or type(run_id) is not int or run_id < 1
@@ -104,23 +144,19 @@ def control(repository, run_id, attempt, api=github, fetch=registry_document, ap
             return report
         if (not stable and expected != "-") or (stable and event != "workflow_dispatch" and (pull_number or expected != "-")):
             return report
+        if stable:
+            return dict(report, reason="main_failure_owned_by_ci")
         pull = None
         if pull_number:
             pull = api("GET", root + "/pulls/" + str(pull_number))
             if (pull.get("number") != pull_number or pull.get("head", {}).get("repo", {}).get("full_name") != repository
                     or pull.get("base", {}).get("repo", {}).get("full_name") != repository or pull["base"].get("ref") != "main"):
                 return report
-            if stable:
-                if (event != "workflow_dispatch" or expected == "-" or pull.get("merged") is not True
-                        or pull.get("merge_commit_sha") != expected):
-                    return report
-            elif pull["head"].get("ref") != branch:
+            if pull["head"].get("ref") != branch:
                 return report
         notice = {"repository": repository, "run_id": run_id, "attempt": attempt, "source_pr": pull_number,
                   "sha": revision, "run_url": run_url, "stage": "", "failed_jobs": [], "conclusion": run.get("conclusion")}
-        if stable and expected != "-":
-            notice["expected_main_sha"] = expected
-        stage = "main_publication" if stable else "beta_validation"
+        stage = "beta_validation"
         data = None
         try:
             data = api("GET", root + "/actions/runs/" + str(run_id) + "/jobs?filter=latest&per_page=100")
@@ -139,9 +175,7 @@ def control(repository, run_id, attempt, api=github, fetch=registry_document, ap
             return dict(report, status="failed", reason=stage, notify=True, notification=dict(notice, stage=stage))
         if run.get("conclusion") != "success":
             return report
-        if stable and expected != "-" and expected != revision:
-            return dict(report, reason="stale_main_dispatch")
-        if stable or pull_number == 0:
+        if pull_number == 0:
             return dict(report, reason="no_candidate_merge")
         if pull.get("state") != "open" or pull.get("draft") is not False or pull["head"].get("sha") != revision:
             return dict(report, reason="stale_or_inactive_candidate")
@@ -256,23 +290,31 @@ def control(repository, run_id, attempt, api=github, fetch=registry_document, ap
 def main():
     parser = argparse.ArgumentParser(description=__doc__)
     parser.add_argument("--apply", action="store_true")
+    parser.add_argument("--main-failure", action="store_true", help="Read-only failure report for the current main CI run")
     parser.add_argument("--output", type=Path, required=True)
     args = parser.parse_args()
+    if args.main_failure and args.apply:
+        parser.error("--main-failure cannot be combined with --apply")
     try:
         event = json.loads(Path(os.environ["GITHUB_EVENT_PATH"]).read_text())
-        repository = os.environ["GITHUB_REPOSITORY"]
-        if (os.environ.get("GITHUB_EVENT_NAME") != "workflow_run" or os.environ.get("GITHUB_REF") != "refs/heads/main"
-                or event["repository"]["full_name"] != repository):
-            raise ValueError("Controller must run from trusted main")
-        run = event["workflow_run"]
-        report = control(repository, run["id"], run["run_attempt"], apply=args.apply)
-    except (OSError, ValueError, KeyError, TypeError):
-        report = {"status": "failed", "reason": "invalid_controller_context", "notify": False}
+        if args.main_failure:
+            report = main_failure(event, os.environ, json.loads(os.environ["WORKFLOW_NEEDS"]), api=github)
+        else:
+            repository = os.environ["GITHUB_REPOSITORY"]
+            if (os.environ.get("GITHUB_EVENT_NAME") != "workflow_run" or os.environ.get("GITHUB_REF") != "refs/heads/main"
+                    or event["repository"]["full_name"] != repository):
+                raise ValueError("Controller must run from trusted main")
+            run = event["workflow_run"]
+            report = control(repository, run["id"], run["run_attempt"], apply=args.apply)
+    except (OSError, ValueError, KeyError, TypeError, AttributeError):
+        report = {"status": "failed", "reason": "invalid_main_failure_context" if args.main_failure else "invalid_controller_context", "notify": False}
     args.output.write_text(json.dumps(report, indent=2) + "\n", encoding="utf-8")
     if os.environ.get("GITHUB_OUTPUT"):
         with open(os.environ["GITHUB_OUTPUT"], "a", encoding="utf-8") as output:
             output.write("notify=" + str(report["notify"]).lower() + "\n")
     print(json.dumps(report, separators=(",", ":")))
+    if args.main_failure and report["notify"]:
+        return 0  # A valid failure report must allow the following sender steps.
     return 1 if report["status"] == "failed" else 0
 
 
