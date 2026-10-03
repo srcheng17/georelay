@@ -1,5 +1,7 @@
 # 主应用镜像启动验证证据
 
+最终状态：全部 AC 已满足。PR13 beta37081881736 与自动正式 main37082388229 均原生 amd64/arm64 实际默认入口启动、HTTP200 登录表单、105迁移、核心表、compiled 地址检查与 adapter34/34 成功。下文早期 pending/品牌镜像记录保留为历史；最终来源和详细证据见文末及父任务 cloud-validation.json。
+
 ## 源码与运行环境
 
 - 日期：2026-10-03；分支 `feat/beta-review-release`，基线 `da6cc08`。
@@ -47,7 +49,7 @@ Main image smoke passed: /sign_in HTTP 200, login HTML verified; migrations=105;
 
 入口损坏的脱敏诊断为 `app state=exited exit=1`；错误端口为 `HTTP readiness timeout`。TERM 到完成清理约 0.359 秒。故障镜像均由同一本次主镜像派生，仅覆盖入口为 /bin/false 或设置 PORT=4001。每次使用新 internal 网络和 tmpfs PostgreSQL，不使用已有卷/数据库、不映射宿主端口。独立回读结果保存在 [runtime-results.json](runtime-results.json)。
 
-## 双架构状态
+## 本机验证时的双架构状态（历史）
 
 | 架构 | 本机真实最终镜像运行 | 云端原生 CI |
 | --- | --- | --- |
@@ -63,7 +65,7 @@ Main image smoke passed: /sign_in HTTP 200, login HTML verified; migrations=105;
 - 仓库未配置独立 typechecker；shellcheck 未执行，不将 actionlint 的禁用 shellcheck 记成 shellcheck 通过。
 - 取消回归之外，审查补齐了 Docker 删除失败的残留容器回读和超长超时输入拒绝；只有清理通过才打印 passed。rm/残留查询/network rm 三项各有 2 秒上限，引擎失联或残留时非零退出，不能声明清理成功。
 
-## 当前交付状态
+## 本地交付时的状态（历史）
 
 本地实现与必要验证完成，保持任务 in_progress，等待 Trellis 3.4 的一次提交计划确认；尚未提交/push/创建 PR。没有运行云端、开启 auto-merge、合入 main 或生产部署。父任务的 beta/条件合并/失败 Bark 授权与规划保留；用户后续已确认部署仅指 GHCR 正式镜像/latest，不更新运行容器。
 
@@ -89,3 +91,14 @@ Installer main run37077752055 at02c4262 completed successfully with both native 
 ## Final integrated automatic release proof (2026-10-03)
 
 PR12 beta37078535617 (head64074c2) and its genuinely bot-merged main workflow_dispatch37079115614 (merge0d1be28, expected/sourcePR12 bound) both passed native amd64/arm64 default-entrypoint actual startup: login HTTP200, 105 migrations, core tables, compiled address checks; packaged adapter34 each. Main run adapter timings15.099s amd64/14.931s arm64. Both beta and stable/latest indexes, child/config digests and OCI labels were deeply read back. No production data, map keys or account was required; container/database/network cleanup gate precedes image save. AC1–AC3 complete; local fault/timeout/TERM evidence remains valid and distinct from actual native cloud startup proof.
+
+## PR13 最终整合结果（2026-10-03）
+
+最终测试源码 head `9e6ab09a5a1d82a07ca621b437cbb8e02ae82098`，自动合并 main `11e2e9d521347edbccbdb2a3691aba79eae43a00`。共享 prepare 及两个地址补丁/上游 Dockerfile 保留；主应用默认 ENTRYPOINT/CMD 未覆盖。无账号、真实地图 Key、host port 或生产卷。
+
+| 原生架构 | Beta 37081881736 | 自动正式 37082388229 |
+| --- | --- | --- |
+| amd64 | 实际启动，HTTP200/105迁移/核心表/compiled地址；adapter34/34，14.865s | 同门禁通过；adapter34/34，15.219s |
+| arm64 | 实际启动，HTTP200/105迁移/核心表/compiled地址；adapter34/34，14.894s | 同门禁通过；adapter34/34，14.788s |
+
+两架构检查和临时容器/数据库/网络清理均在保存已检查镜像前完成，verify/publish 全成功，正式固定版本与 latest 双索引/子manifest/config size+digest/OCI 深验通过。父任务真实bot main失败37083060335又证明early source拒绝阻断build/publish、artifacts0、独立Bark收尾成功，latest和main不变；临时probe资源清理完成。AC1–AC3全部完成，实际镜像运行证据与离线/static测试保持区分。完整链接及digest见 [父任务验证](../10-03-beta-review-release/validation.md) 与 [cloud-validation.json](../10-03-beta-review-release/cloud-validation.json)。部署仅GHCR，未更新运行容器或生产数据。

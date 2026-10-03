@@ -1,25 +1,25 @@
 {
-  "integration_base": "c8a6e837d32a8757043fa4d2a5f6abd876a64bb3",
+  "integration_base": "0d1be28afe08d0fd43dc028c207d76c7a826d538",
   "merge_authorized": true,
   "latest_before_beta": {
     "georelay": {
-      "digest": "sha256:01938ac18e399761abd5d2663d9a9c1e05db704b18c84590bf0196599a86c588",
+      "digest": "sha256:0957ca05ab40fcdd5313ead104fb2a82595fcea7b89f189bd4956e0b59d6bf06",
       "platforms": [
         "linux/amd64",
         "linux/arm64"
       ]
     },
     "georelay-adapter": {
-      "digest": "sha256:a8a7318d397df1bddb75d4fe6396adae9af32c1a724f4e2b934668c3b98ac2a2",
+      "digest": "sha256:c8240075d2a3eef8a0e173799ffce2365e16a610959876eb905a6696887f38b5",
       "platforms": [
         "linux/amd64",
         "linux/arm64"
       ]
     }
   },
-  "pr": "https://github.com/srcheng17/georelay/pull/10",
-  "beta_run": 37071951401,
-  "main_run": 37072746968,
+  "pr": "https://github.com/srcheng17/georelay/pull/13",
+  "beta_run": 37081881736,
+  "main_run": 37082388229,
   "beta_runs": [
     {
       "id": 37068534907,
@@ -153,6 +153,36 @@
       },
       "verify": "success",
       "publish": "success"
+    },
+    {
+      "id": 37081881736,
+      "head": "9e6ab09a5a1d82a07ca621b437cbb8e02ae82098",
+      "conclusion": "success",
+      "build-amd64": {
+        "startup": "success",
+        "http_status": 200,
+        "migrations": 105,
+        "core_tables": "present",
+        "compiled_address_checks": "passed",
+        "adapter_tests": 34,
+        "adapter_seconds": 14.865
+      },
+      "build-arm64": {
+        "startup": "success",
+        "http_status": 200,
+        "migrations": 105,
+        "core_tables": "present",
+        "compiled_address_checks": "passed",
+        "adapter_tests": 34,
+        "adapter_seconds": 14.894
+      },
+      "verify": "success",
+      "publish": "success",
+      "main-failure-notification": {
+        "conclusion": "success",
+        "notify": false,
+        "checkout_report_dry_run_send": "skipped"
+      }
     }
   ],
   "linux_fixture_fix": {
@@ -166,13 +196,12 @@
     "oversized_ascii_and_unicode_regressions": "preserved and passed"
   },
   "beta_registry": {
-    "both_indexes": "exact amd64/arm64 with verified child/config digests and OCI source/revision/version",
-    "version": "v4.3.0-georelay-beta-4dce3a817fd0608fe7e9e3b271e4cd4562dd0ed6",
-    "georelay": "sha256:0d924df9d14c3f852fc92e028f15d6814a8f6f305983491b02edc8cd64c594ec",
-    "georelay-adapter": "sha256:71594e209dbbcfd15739f22b3ab9cba225be84ee4521579268b829af61fe97cc",
-    "beta-pr-10": "exact version digests",
-    "latest": "unchanged from before beta",
-    "control_dry_run": "candidate_ready; no mutations"
+    "version": "v4.3.0-georelay-beta-9e6ab09a5a1d82a07ca621b437cbb8e02ae82098",
+    "georelay": "sha256:2922b54e924d00a3ef43bdab6f541582dcc19b74f154e9a64b220cd96b8d0db4",
+    "georelay-adapter": "sha256:e169d7f17b05e7b4cf107a174eea0bdfe51b313298e1cde7a7f02e1214524403",
+    "alias": "beta-pr-13 exact indexes",
+    "latest_before_main_publication": "unchanged main0d1 indexes",
+    "verification": "native amd64/arm64; child/config size+digests; OCI source/revision/version verified"
   },
   "bark_secret": {
     "name": "BARK_URL",
@@ -295,6 +324,45 @@
         "georelay-adapter": "sha256:c8240075d2a3eef8a0e173799ffce2365e16a610959876eb905a6696887f38b5",
         "latest": "both exact version indexes; amd64/arm64 and child/config size+digests/OCI passed"
       }
+    },
+    {
+      "id": 37082388229,
+      "head": "11e2e9d521347edbccbdb2a3691aba79eae43a00",
+      "event": "workflow_dispatch",
+      "source_pr": 13,
+      "expected_main_sha": "11e2e9d521347edbccbdb2a3691aba79eae43a00",
+      "conclusion": "success",
+      "build-amd64": {
+        "startup": "success",
+        "http_status": 200,
+        "migrations": 105,
+        "core_tables": "present",
+        "compiled_address_checks": "passed",
+        "adapter_tests": 34,
+        "adapter_seconds": 15.219
+      },
+      "build-arm64": {
+        "startup": "success",
+        "http_status": 200,
+        "migrations": 105,
+        "core_tables": "present",
+        "compiled_address_checks": "passed",
+        "adapter_tests": 34,
+        "adapter_seconds": 14.788
+      },
+      "verify": "success",
+      "publish": "success",
+      "main-failure-notification": {
+        "conclusion": "success",
+        "notify": false,
+        "checkout_report_dry_run_send": "skipped"
+      },
+      "registry": {
+        "version": "v4.3.0-georelay-11e2e9d521347edbccbdb2a3691aba79eae43a00",
+        "georelay": "sha256:4647bf8e2e6ce4a470df51b19165e6f7651c4b151733fda99dc254906e56d04a",
+        "georelay-adapter": "sha256:50cb3128ba2fee378b53b6fe2dbec50653e7352f2775ffbec56c232876a14ced",
+        "latest": "both exact version indexes; two arches, child/config size+digest and OCI verified"
+      }
     }
   ],
   "batch_fixture_fix": {
@@ -409,44 +477,53 @@
     "live_default_token_acceptance": "PR12 exact head beta success; installed controller auto merge and main dispatch success; the late-base rejection remains a unit simulation, not a live base-race experiment"
   },
   "automatic_acceptance": {
-    "pr": 12,
-    "head": "64074c219810b581bd8334b142ba0d1a25346d3c",
-    "beta_run": 37078535617,
+    "pr": 13,
+    "pr_url": "https://github.com/srcheng17/georelay/pull/13",
+    "head": "9e6ab09a5a1d82a07ca621b437cbb8e02ae82098",
+    "beta_run": 37081881736,
     "beta_registry": {
-      "version": "v4.3.0-georelay-beta-64074c219810b581bd8334b142ba0d1a25346d3c",
-      "georelay": "sha256:c16611ade36765ad09fad589f44e9289a4d201464b868bbbadd03ac660f723c5",
-      "georelay-adapter": "sha256:42f51321958f1b4bd43784013f57e33319368ef5151e0fac492c49c53ef9f071",
-      "alias": "beta-pr-12 exact indexes",
-      "latest_before_main_publication": "unchanged main02c indexes",
-      "verification": "two arches; child/config size and digests; OCI source/revision/version verified"
+      "version": "v4.3.0-georelay-beta-9e6ab09a5a1d82a07ca621b437cbb8e02ae82098",
+      "georelay": "sha256:2922b54e924d00a3ef43bdab6f541582dcc19b74f154e9a64b220cd96b8d0db4",
+      "georelay-adapter": "sha256:e169d7f17b05e7b4cf107a174eea0bdfe51b313298e1cde7a7f02e1214524403",
+      "alias": "beta-pr-13 exact indexes",
+      "latest_before_main_publication": "unchanged main0d1 indexes",
+      "verification": "native amd64/arm64; child/config size+digests; OCI source/revision/version verified"
     },
-    "controller_run": 37079096065,
+    "controller_run": 37082367599,
     "controller_status": "merged_dispatched",
     "controller_reason": "main_publication_requested",
     "notify": false,
     "bark_step": "skipped",
     "merged_by": "github-actions[bot]",
-    "merge_sha": "0d1be28afe08d0fd43dc028c207d76c7a826d538",
-    "main_dispatch_run": 37079115614,
+    "merge_sha": "11e2e9d521347edbccbdb2a3691aba79eae43a00",
+    "main_dispatch_run": 37082388229,
     "event": "workflow_dispatch",
-    "source_pr": 12,
-    "expected_main_sha": "0d1be28afe08d0fd43dc028c207d76c7a826d538",
-    "actual_head_sha": "0d1be28afe08d0fd43dc028c207d76c7a826d538",
-    "manual_mutations": "none for this candidate merge/dispatch; performed by installed main workflow GITHUB_TOKEN",
+    "source_pr": 13,
+    "expected_main_sha": "11e2e9d521347edbccbdb2a3691aba79eae43a00",
+    "actual_head_sha": "11e2e9d521347edbccbdb2a3691aba79eae43a00",
+    "manual_mutations": "none for candidate merge/dispatch; installed main workflow GITHUB_TOKEN performed both",
     "owner_protection_readback": {
       "strict": true,
       "enforce_admins": true,
       "verify_app": 15368,
-      "main_sha": "0d1be28afe08d0fd43dc028c207d76c7a826d538"
+      "main_sha": "11e2e9d521347edbccbdb2a3691aba79eae43a00"
     },
-    "main_observer": "no downstream workflow_run observed after bot dispatch; do not claim main-failure delivery coverage from source success"
+    "main_notification_ownership": "independent main CI finalizer; successful source skipped notification; no observer delivery claim"
   },
   "final_status": {
-    "all_acceptance_criteria": "automatic merge/dispatch, native runtime and stable/latest passed; automatic-main failure notification trigger under investigation",
-    "main_sha": "0d1be28afe08d0fd43dc028c207d76c7a826d538",
-    "bark": "BARK_URL configured; actual failure sender dry-run/sent/one attempt/HTTP200/code200 verified; handset receipt not independently verified",
+    "all_acceptance_criteria": "passed; native runtime, beta/current-head automatic merge, bound main dispatch, stable/latest and real beta/main failure Bark API acceptance verified",
+    "pr": 13,
+    "head": "9e6ab09a5a1d82a07ca621b437cbb8e02ae82098",
+    "main_sha": "11e2e9d521347edbccbdb2a3691aba79eae43a00",
+    "beta_run": 37081881736,
+    "controller_run": 37082367599,
+    "main_run": 37082388229,
+    "main_failure_run": 37083060335,
+    "bark": "BARK_URL configured and secret name read back; real bot main failure dry-run/sent/one attempt/HTTP200/code200 verified; handset receipt not independently verified",
     "deployment_scope": "GHCR stable/latest only; running containers and production data unchanged",
-    "temporary_probe_resources": "all removed; absence verified"
+    "temporary_probe_resources": "all remote/local branches, worktrees and temporary files removed; absence verified",
+    "quality_gate": "independent139/139 in88.019s; actionlint v1.7.12 -shellcheck=, AST/JSON/diff passed; no configured static typechecker; shellcheck not run",
+    "platform_limit": "whole-run forced termination still depends on GitHub scheduling the finalizer"
   },
   "automatic_main_notification_gap": {
     "source_run": 37079115614,
@@ -472,7 +549,140 @@
     "correction": "main CI always finalizer owns notification, beta/no-op decision succeeds; readonly main_failure report; stable observer skips before PR API to prevent duplicate; existing Bark sender unchanged",
     "targeted_checks": "controller23/Bark6/context5/ci_changes7; AST/actionlint -shellcheck=/diff passed",
     "full_suite": "independent139/139 in88.019s; actionlint -shellcheck=/AST/diff passed; no review blockers",
-    "live_bot_failure": "pending new candidate/main and controlled stale-SHA dispatch; do not declare accepted yet",
-    "platform_limit": "forced whole-run termination still depends on GitHub scheduling finalizer"
+    "live_bot_failure": {
+      "run": 37083060335,
+      "status": "passed",
+      "notify": true,
+      "sender_status": "sent",
+      "sender_attempts": 1,
+      "http_status": 200,
+      "artifact_count": 0,
+      "publish": "skipped",
+      "latest": "unchanged; independently verified"
+    },
+    "platform_limit": "forced whole-run termination still depends on GitHub scheduling finalizer",
+    "status": "resolved and accepted by real bot-dispatched main failure"
+  },
+  "automatic_acceptance_history": [
+    {
+      "pr": 12,
+      "head": "64074c219810b581bd8334b142ba0d1a25346d3c",
+      "beta_run": 37078535617,
+      "beta_registry": {
+        "version": "v4.3.0-georelay-beta-64074c219810b581bd8334b142ba0d1a25346d3c",
+        "georelay": "sha256:c16611ade36765ad09fad589f44e9289a4d201464b868bbbadd03ac660f723c5",
+        "georelay-adapter": "sha256:42f51321958f1b4bd43784013f57e33319368ef5151e0fac492c49c53ef9f071",
+        "alias": "beta-pr-12 exact indexes",
+        "latest_before_main_publication": "unchanged main02c indexes",
+        "verification": "two arches; child/config size and digests; OCI source/revision/version verified"
+      },
+      "controller_run": 37079096065,
+      "controller_status": "merged_dispatched",
+      "controller_reason": "main_publication_requested",
+      "notify": false,
+      "bark_step": "skipped",
+      "merged_by": "github-actions[bot]",
+      "merge_sha": "0d1be28afe08d0fd43dc028c207d76c7a826d538",
+      "main_dispatch_run": 37079115614,
+      "event": "workflow_dispatch",
+      "source_pr": 12,
+      "expected_main_sha": "0d1be28afe08d0fd43dc028c207d76c7a826d538",
+      "actual_head_sha": "0d1be28afe08d0fd43dc028c207d76c7a826d538",
+      "manual_mutations": "none for this candidate merge/dispatch; performed by installed main workflow GITHUB_TOKEN",
+      "owner_protection_readback": {
+        "strict": true,
+        "enforce_admins": true,
+        "verify_app": 15368,
+        "main_sha": "0d1be28afe08d0fd43dc028c207d76c7a826d538"
+      },
+      "main_observer": "no downstream workflow_run observed after bot dispatch; do not claim main-failure delivery coverage from source success"
+    }
+  ],
+  "main_failure_acceptance": {
+    "status": "passed",
+    "run": 37083060335,
+    "run_url": "https://github.com/srcheng17/georelay/actions/runs/37083060335",
+    "actor": "github-actions[bot]",
+    "triggering_actor": "github-actions[bot]",
+    "source_pr": 13,
+    "actual_head_sha": "11e2e9d521347edbccbdb2a3691aba79eae43a00",
+    "expected_main_sha": "0d1be28afe08d0fd43dc028c207d76c7a826d538",
+    "conclusion": "failure",
+    "checks": "failed at Bind source before build; fixed marker only, no publication context",
+    "verify": "failure",
+    "build": "skipped; native matrix did not materialize",
+    "publish": "skipped",
+    "artifact_count": 0,
+    "notification_job": {
+      "id": 111087605573,
+      "conclusion": "success",
+      "report_status": "failed",
+      "stage": "main_publication",
+      "notify": true,
+      "failed_jobs": [
+        "checks",
+        "verify"
+      ],
+      "actual_expected_source_pr": "verified against native context",
+      "dry_run_status": "dry_run",
+      "dry_run_attempts": 0,
+      "sender_status": "sent",
+      "sender_attempts": 1,
+      "http_status": 200,
+      "response_code": "200 verified by sender",
+      "phone_receipt": "not independently verified"
+    },
+    "latest_after_failure": {
+      "georelay": "sha256:4647bf8e2e6ce4a470df51b19165e6f7651c4b151733fda99dc254906e56d04a",
+      "georelay-adapter": "sha256:50cb3128ba2fee378b53b6fe2dbec50653e7352f2775ffbec56c232876a14ced",
+      "fixed_version": "v4.3.0-georelay-11e2e9d521347edbccbdb2a3691aba79eae43a00",
+      "verification": "unchanged; independently reverified both arches, child/config size+digests and OCI; main ref unchanged"
+    },
+    "probe": {
+      "branch": "qa/georelay-main-failure-probe-37082388229",
+      "head": "158c2518952eb89933df87a7192d04729ed4e294",
+      "run": 37083052408,
+      "conclusion": "success",
+      "purpose": "check-only GITHUB_TOKEN stale-SHA dispatch to exercise real bot main failure",
+      "pr": "none",
+      "controller_run": 37083065040,
+      "controller_status": "skipped",
+      "controller_reason": "untrusted_or_unrelated_run",
+      "notify": false,
+      "bark_step": "skipped",
+      "cleanup": "remote/local branch deleted after exact-SHA verification; worktree and temporary files removed; all absence independently verified"
+    }
+  },
+  "bootstrap_snapshot": {
+    "integration_base": "c8a6e837d32a8757043fa4d2a5f6abd876a64bb3",
+    "latest_before_beta": {
+      "georelay": {
+        "digest": "sha256:01938ac18e399761abd5d2663d9a9c1e05db704b18c84590bf0196599a86c588",
+        "platforms": [
+          "linux/amd64",
+          "linux/arm64"
+        ]
+      },
+      "georelay-adapter": {
+        "digest": "sha256:a8a7318d397df1bddb75d4fe6396adae9af32c1a724f4e2b934668c3b98ac2a2",
+        "platforms": [
+          "linux/amd64",
+          "linux/arm64"
+        ]
+      }
+    },
+    "pr": "https://github.com/srcheng17/georelay/pull/10",
+    "beta_run": 37071951401,
+    "main_run": 37072746968,
+    "beta_registry": {
+      "both_indexes": "exact amd64/arm64 with verified child/config digests and OCI source/revision/version",
+      "version": "v4.3.0-georelay-beta-4dce3a817fd0608fe7e9e3b271e4cd4562dd0ed6",
+      "georelay": "sha256:0d924df9d14c3f852fc92e028f15d6814a8f6f305983491b02edc8cd64c594ec",
+      "georelay-adapter": "sha256:71594e209dbbcfd15739f22b3ab9cba225be84ee4521579268b829af61fe97cc",
+      "beta-pr-10": "exact version digests",
+      "latest": "unchanged from before beta",
+      "control_dry_run": "candidate_ready; no mutations"
+    },
+    "scope": "historical PR10 bootstrap; not final PR13 status"
   }
 }
