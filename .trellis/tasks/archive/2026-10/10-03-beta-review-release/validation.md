@@ -1,8 +1,8 @@
 # Beta 发布链路验证记录
 
-最终状态：PR12 已由 GitHub Actions bot 自动合并；自动 main dispatch37079115614 的双架构实际启动/105迁移/adapter34、verify、公版与 latest 均通过。完整证据见文末及 [cloud-validation.json](cloud-validation.json)。前面的本地/bootstrap记录按当时状态保留，不能作为当前未完成项列表。
+最终状态：全部验收通过。[PR13](https://github.com/srcheng17/georelay/pull/13) head `9e6ab09` 已由 GitHub Actions bot 自动合并至 `11e2e9d`；beta `37081881736`、控制器 `37082367599`、自动正式发布 `37082388229` 成功。原生 amd64/arm64 均通过主应用真实启动/HTTP200/105迁移/adapter34，正式版本与 latest 深验通过；真实 bot main 失败 `37083060335` 已验证独立收尾通知、零产物与 latest 不变。完整证据见文末及 [cloud-validation.json](cloud-validation.json)。下方旧本地/bootstrap/PR12记录保留为历史，不是当前未完成项。
 
-最新状态：用户已明确授权“合并，验证”。main c8a6e83（PR9）已整合，保留地址-only共享prepare与原Dockerfile；启动门禁已移除品牌/法律端点检查。整合后的完整130/130通过（85.830秒），Trellis复核通过。下面旧arm64三补丁/品牌镜像结果仅为历史验证；本次最终镜像以新PR云端native amd64/arm64结果为准，不能复用旧镜像声明整合启动成功。云端结果将记录在cloud-validation.json。
+历史整合状态：用户已明确授权“合并，验证”。main c8a6e83（PR9）已整合，保留地址-only共享prepare与原Dockerfile；启动门禁已移除品牌/法律端点检查。整合后的完整130/130通过（85.830秒），Trellis复核通过。下面旧arm64三补丁/品牌镜像结果仅为历史验证；本次最终镜像以新PR云端native amd64/arm64结果为准，不能复用旧镜像声明整合启动成功。云端结果将记录在cloud-validation.json。
 
 日期：2026-10-03。分支 `feat/beta-review-release`，本地基线 `da6cc08`。用户已批准实施和未来条件合并；本次 bootstrap PR 仍须明确审阅合并。本地验证结束时尚未提交；未push、创建 PR、调用真实 merge/dispatch、发布镜像、发送真实 Bark 或操作运行服务。
 
@@ -14,7 +14,7 @@
 - 失败通知与成功合并门禁独立：无产物 beta 失败、已合并 PR 的 main 失败仍通知；轻量、check-only、fork与正常陈旧成功候选不通知。Bark endpoint 仅发送步骤可见，固定脱敏 payload、先 dry-run、有界重试、响应 code200验证；terminal uncertain 不盲目重发。
 - 修复最终审查发现的轻量跳过被误报为 beta 失败，以及保护摘要检查须显式要求 protected/enabled/everyone 与 verify app15368。README中英、AMAP与spec已同步。
 
-## 最终镜像实际运行证据
+## 品牌收窄前的本机运行证据（历史）
 
 通过共享 `scripts/prepare_upstream.py` 准备的当前固定源码：TeslaMate v4.3.0 / `33d200b2fba9d5138803916a788cef5eae31b1aa`；最新再核对 prepared HEAD、当前三份补丁 reverse-check、法律/MODIFICATIONS一致。未使用过期 `/tmp/teslamate-amap-prepared-check`，未改其他worktree的prepare/branding责任文件。
 
@@ -45,7 +45,7 @@ Main image smoke passed: /sign_in HTTP 200, login HTML verified; migrations=105;
 - Trellis full-scope checker审查所有受影响层与任务契约；发布相关53项、controller/Bark20项独立复核通过，无剩余阻塞代码问题。仓库无静态typechecker，未执行shellcheck，不将语法检查说成typecheck。
 - 只读GitHub实例 run37064970725与其verify check-run111032105672的head_sha一致（实际PR head），check来自Actions app15368且details URL指向本run/job，支持PR provenance设计。已有本地gh身份回读main GraphQL严格保护有效；这不证明Actions token权限。
 
-## 待验证与交付边界
+## 本地交付时的待验证边界（历史）
 
 | 项目 | 状态 |
 | --- | --- |
@@ -98,7 +98,7 @@ Late-base regression uses the existing controller fixture: main moves after the 
 
 Main installer run37077752055 at02c4262 completed successfully: both native main runtime/adapter suites and verify/publication passed. Both stable indexes/child/config digests/OCI labels were verified; each latest exactly matched v4.3.0-georelay-02c426233bd972506f5149810afa96fab6388fb3. This was the installer’s user merge/push run; automatic merge/dispatch remains a separate pending acceptance.
 
-## Final automatic acceptance (2026-10-03)
+## PR12 automatic acceptance (historical, 2026-10-03)
 
 PR12 exact head64074c219810b581bd8334b142ba0d1a25346d3c passed beta37078535617 on native amd64 and arm64: default release startup, login HTTP200, 105 migrations, core tables, compiled address contract and packaged adapter34/34. Both fixed beta indexes/child/config size+digests/OCI labels and beta-pr-12 were verified, with latest unchanged at main02c.
 
@@ -106,12 +106,27 @@ Installed main controller37079096065 returned merged_dispatched/main_publication
 
 That automatic main run completed both native default-startup checks: HTTP200 login HTML, 105 migrations, core tables and compiled addresses. Packaged adapter34/34 passed in15.099s amd64 and14.931s arm64; verify and publish succeeded. Both formal version indexes and latest exactly matched v4.3.0-georelay-0d1be28afe08d0fd43dc028c207d76c7a826d538; complete child/config size+digest/OCI checks passed. Owner readback after automatic merge still confirmed strict=true/enforce_admins=true/verify app15368 and current main0d1be28. This owner readback is distinct from the controller’s readable summary, which has no strict field.
 
-Runtime/publication/automatic-merge acceptance passed; automatic-main failure notification trigger is now under investigation because its downstream workflow_run observer did not appear. The following requirements have implementation/local coverage, with formal failure delivery not yet accepted: exact-source beta/stable channels, two native runtime suites before save/publication, reuse of checked artifacts, current-head ordinary protected auto merge and explicit dispatch, real failure Bark API acceptance plus mock main-failure/closed-PR coverage, publisher/updater/retention/spec/document consistency, and final cloud proof. The late-base rejection is a unit simulation of GitHub strict behavior; it is not reported as a live raced-main experiment. Bark API code200 acceptance is not independent handset receipt. No running container or production data was changed; all temporary probe/failure resources were removed.
+Historical PR12 checkpoint: runtime/publication/automatic-merge acceptance passed; the absent downstream workflow_run observer then prompted investigation of automatic-main failure notification. The following requirements had implementation/local coverage, while formal failure delivery was not yet accepted at that checkpoint: exact-source beta/stable channels, two native runtime suites before save/publication, reuse of checked artifacts, current-head ordinary protected auto merge and explicit dispatch, real failure Bark API acceptance plus mock main-failure/closed-PR coverage, publisher/updater/retention/spec/document consistency, and final cloud proof. The late-base rejection is a unit simulation of GitHub strict behavior; it is not reported as a live raced-main experiment. Bark API code200 acceptance is not independent handset receipt. No running container or production data was changed; all temporary probe/failure resources were removed.
 
 ## Automatic-main failure notification correction (2026-10-03)
 
 The successful bot main dispatch37079115614 produced no observer at least6m39s after completion. Human main push37077752055 and human check-only dispatch37076000025 each produced an observer in2s. Default workflow remains active with unchanged trigger/name. This is consistent with documented GITHUB_TOKEN event suppression; there is no API suppression reason and no established excess of the documented workflow_run chain limit. Formal failure notification could not be accepted from mock observer tests.
 
-The correction uses one always CI finalizer: native boolean decision always succeeds for beta/no-op, and only main image publication failure loads checked main code and readonly report, then existing Bark dry-run/verified send. Dry-run uses a fixed placeholder without a Secret; only real sender sees BARK_URL. Optional PR GET matches actual main merge SHA/repository/ref/merged facts, else basic PR0 run notification persists; valid expected SHA still diagnoses stale dispatch. Stable observer relinquishes main notification before PR API reads, preventing duplicate or late API-error notification. Publisher hard timeout and checkout failure are covered by the independent job; forced whole-run termination still depends on platform scheduling. Targeted controller23/Bark6/context5/CI7, AST/actionlint/diff passed; independent full suite and actual bot failure/zero-publication acceptance remain pending.
+The correction uses one always CI finalizer: native boolean decision always succeeds for beta/no-op, and only main image publication failure loads checked main code and readonly report, then existing Bark dry-run/verified send. Dry-run uses a fixed placeholder without a Secret; only real sender sees BARK_URL. Optional PR GET matches actual main merge SHA/repository/ref/merged facts, else basic PR0 run notification persists; valid expected SHA still diagnoses stale dispatch. Stable observer relinquishes main notification before PR API reads, preventing duplicate or late API-error notification. Publisher hard timeout and checkout failure are covered by the independent job; forced whole-run termination still depends on platform scheduling. Targeted controller23/Bark6/context5/CI7, AST/actionlint/diff passed. The independent full suite and real bot-failure acceptance were subsequently completed below.
 
-Independent final review of the correction passed the full suite139/139 in88.019s and actionlint v1.7.12(-shellcheck=), AST, JSON/diff checks; no code/design blocker. No static typechecker is configured. The report/notification path is still pending real bot-failure cloud acceptance, despite earlier successful image publication.
+Independent final review of the correction passed the full suite139/139 in88.019s and actionlint v1.7.12(-shellcheck=), AST, JSON/diff checks; no code/design blocker. No static typechecker is configured. The report/notification path passed the subsequent real bot-failure cloud acceptance below.
+
+## PR13 最终成功与真实失败验收（2026-10-03）
+
+[Beta 37081881736](https://github.com/srcheng17/georelay/actions/runs/37081881736) 精确对应 PR13 head `9e6ab09a5a1d82a07ca621b437cbb8e02ae82098`。原生 amd64/arm64 保留主应用默认 ENTRYPOINT/CMD，以全新临时 PostgreSQL 实际完成 105 项迁移、核心表及 compiled 地址契约检查，`/sign_in` HTTP200 登录表单通过；adapter 均 34/34（14.865s / 14.894s）。verify、beta 发布和双索引/子 manifest/config digest/OCI 深验成功，beta-pr-13 精确匹配固定版本，beta 未改 latest。通知收尾 job 成功且 notify=false，checkout/report/dry-run/send 均 skipped。
+
+[控制器 37082367599](https://github.com/srcheng17/georelay/actions/runs/37082367599) 返回 merged_dispatched/main_publication_requested/notify=false，用默认 GITHUB_TOKEN 自动将 PR13 合并至 `11e2e9d521347edbccbdb2a3691aba79eae43a00` 并显式派发 [正式 run 37082388229](https://github.com/srcheng17/georelay/actions/runs/37082388229)。expected/actual SHA 与 sourcePR13 绑定；两原生架构再次实际完成 HTTP200、105 迁移、核心表与地址检查，adapter 34/34（15.219s / 14.788s），verify/publish 全通过。成功通知 notify=false，Secret 步骤 skipped。两包 latest 精确对应 `v4.3.0-georelay-11e2e9d521347edbccbdb2a3691aba79eae43a00`：
+
+- georelay：`sha256:4647bf8e2e6ce4a470df51b19165e6f7651c4b151733fda99dc254906e56d04a`。
+- adapter：`sha256:50cb3128ba2fee378b53b6fe2dbec50653e7352f2775ffbec56c232876a14ced`。
+
+最后用无 PR 的临时 check-only probe `37083052408` 及其 GITHUB_TOKEN 派发真实 main，传入已确认过期的 expected SHA。派生 [bot main run 37083060335](https://github.com/srcheng17/georelay/actions/runs/37083060335) actor/triggering_actor 均为 github-actions[bot]，actual `11e2e9d` / expected 旧 `0d1be28` / sourcePR13。在 Bind source 阶段非零退出，build/publish skipped、artifacts=0。独立 main-failure-notification job `111087605573` 成功，report 为 failed/main_publication/notify=true，actual/expected/sourcePR13 和失败 jobs checks/verify 正确；dry-run 0 次网络发送，真实 Bark sent/1 次/HTTP200，sender 验证 JSON code200。没有依赖不存在的 main observer；API 接受不代表独立确认手机收件。
+
+失败后独立重新深验两包 latest/固定版本的双架构、子 manifest/config size+digest 与 OCI 标签，仍精确等于上述 baseline；main ref 也未变。probe 自身 controller `37083065040` skipped/untrusted_or_unrelated_run/notify=false，Bark skipped。临时远端与本地分支在核对 SHA 后删除，worktree 和临时文件移除，所有路径/refs 不存在已独立回读。保护 strict=true、enforce_admins=true、verify app15368 仍有效，设置未改。
+
+全部需求与父子任务 AC 完成；质量门禁为独立 139/139（88.019s）、actionlint v1.7.12 `-shellcheck=`、AST/JSON/diff 通过。无配置静态 typechecker，未执行 shellcheck；整个 run 被强制终止时通知仍依赖 GitHub 调度收尾 job。发布范围仅 GHCR 正式镜像/latest，运行容器和生产数据未更新。

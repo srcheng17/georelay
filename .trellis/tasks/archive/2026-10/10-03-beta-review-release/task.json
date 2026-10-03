@@ -1,0 +1,28 @@
+{
+  "id": "beta-review-release",
+  "name": "beta-review-release",
+  "title": "Beta 镜像测试、条件自动合并与失败 Bark 通知",
+  "description": "可信 beta 双架构测试/发布成功且 PR head/base 有效时条件合并并发布 main GHCR 镜像；失败 Bark，不更新运行容器",
+  "status": "completed",
+  "dev_type": "backend",
+  "scope": "release-pipeline",
+  "package": null,
+  "priority": "P2",
+  "creator": "ryancheng",
+  "assignee": "ryancheng",
+  "createdAt": "2026-10-03",
+  "completedAt": "2026-10-03",
+  "branch": "feat/beta-review-release",
+  "base_branch": "main",
+  "worktree_path": null,
+  "commit": "9e6ab09",
+  "pr_url": "https://github.com/srcheng17/georelay/pull/13",
+  "subtasks": [],
+  "children": [
+    "10-03-main-image-smoke"
+  ],
+  "parent": null,
+  "relatedFiles": [],
+  "notes": "用户明确授权本任务合并验证、未来beta成功/current PR head条件自动合并，部署仅GHCR。最终PR13 head9e6ab09 beta37081881736双原生架构真实默认入口/HTTP200/105迁移/核心表/compiled地址/adapter34与双索引深验通过；控制器37082367599用GITHUB_TOKEN自动合并到11e2e9d并dispatch37082388229，expected/actual SHA与sourcePR13绑定，正式/latest两包深验通过。BARK_URL已安全配置；真实bot main failure37083060335早期拒绝stale SHA，build/pub跳过、artifacts0，main独立finalizer notifytrue，dry-run0次/真实sent1次/HTTP200及JSONcode200；latest与main不变。check-only probe不通知，临时分支/worktree/文件已清理并核验不存在。139/139、actionlint/AST/JSON/diff通过；strict/admin/verify保护设置未改。全部AC满足。未独立核验手机收件，未更新运行容器/生产数据。",
+  "meta": {}
+}

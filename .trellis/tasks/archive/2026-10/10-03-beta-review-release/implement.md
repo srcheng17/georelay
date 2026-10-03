@@ -32,7 +32,7 @@
 
 来源不可信、索引不完整、保护拒绝、head/base 变更时停止相应写入；区分正常陈旧跳过与实际失败。合并结果不确定先回读，不重复 merge；dispatch 成功不代表发布完成。只回退本任务源码，不更新运行容器，不删除既有镜像；通知结果不确定不盲目重发。
 
-最终本地结果：131/131、实际arm64整链及故障/TERM通过、Trellis全域审查通过；完整证据与云端/真实Bark待验收边界见validation.md。
+历史本地结果：131/131、实际arm64整链及故障/TERM通过、Trellis全域审查通过；最终139/139、双原生架构与真实Bark闭环已完成，见validation.md。
 
 2026-10-03最终整合：用户明确回复“合并，验证”，已授权本次bootstrap分支/PR合入并验证GHCR。整合main c8a6e83（PR9）地址-only修改，保留共享prepare、两个地址补丁与原生Dockerfile；删除品牌词/法律端点额外门禁，以真实登录表单、迁移和compiled地址RPC验收。旧品牌镜像测试记录仅为历史结果；最终以本次云端运行结果为准。
 
@@ -42,3 +42,10 @@
 2. Reuse release_control readonly report + existing Bark sender; confirm source PR against actual merged main when readable, otherwise preserve basic run notification. Do not add credentials/dependencies or alter runtime checks. Stable workflow_run observer relinquishes main notifications to avoid duplication.
 3. Reproduce absent-bot-observer boundary in tests, validate report/condition/ownership and controller/Bark regressions/actionlint. Push same-task candidate and verify beta + installed controller ordinary auto merge/dispatch + final stable/latest.
 4. Use isolated check-only probe branch’s GITHUB_TOKEN to dispatch main with a valid stale expected SHA, proving early failure blocks build/artifacts/publication and CI finalizer sends one verified Bark. Remove probe resources and verify latest unchanged. Only then finish/archive.
+
+## 最终验收状态
+
+- [x] PR13 beta37081881736、控制器37082367599自动合并、正式37082388229的双架构真实启动/105迁移/adapter34和stable/latest深验通过。
+- [x] 真实bot main失败37083060335早期拒绝stale SHA，build/pub跳过、artifacts0；独立收尾job dry-run通过，Bark sent/1次/HTTP200及JSONcode200。
+- [x] 失败后两包latest及main未变；check-only probe不通知，临时分支/worktree/文件已清理并验证不存在。
+- [x] 独立139/139、actionlint/AST/JSON/diff通过，文档/spec同步；全部AC满足。收尾证据仅本地任务分支提交，不触发额外正式发布。
