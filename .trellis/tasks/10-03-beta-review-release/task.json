@@ -15,14 +15,14 @@
   "branch": "feat/beta-review-release",
   "base_branch": "main",
   "worktree_path": null,
-  "commit": "64074c2",
-  "pr_url": "https://github.com/srcheng17/georelay/pull/12",
+  "commit": "9e6ab09",
+  "pr_url": "https://github.com/srcheng17/georelay/pull/13",
   "subtasks": [],
   "children": [
     "10-03-main-image-smoke"
   ],
   "parent": null,
   "relatedFiles": [],
-  "notes": "用户明确授权本任务合并验证和未来beta成功/current PR head条件自动合并，部署仅GHCR。PR10/11经普通expected-head安装；PR12 head64074c2 beta37078535617双原生架构实际startup/HTTP200/105迁移/address/adapter34与双索引深验成功。可信main controller37079096065由GITHUB_TOKEN自动bot merge到0d1be28并显式dispatch37079115614，sourcePR12/expectedSHA绑定；正式run两架构startup/105迁移/adapter34/verify/pub通过，两包stable/latest及OCI/digest完全回读。控制器+Bark22/22，late-head/base回归通过；strict/admin/verify owner读回未变。BARK_URL安全配置，多次真实失败APIcode200成功，成功Bark skipped；未独立确认手机收件。临时资源已清理。自动main完成后未出现workflow_run observer，正式失败Bark触发覆盖待根因核对；先不归档；未更新运行容器/生产数据。",
+  "notes": "用户明确授权本任务合并验证、未来beta成功/current PR head条件自动合并，部署仅GHCR。最终PR13 head9e6ab09 beta37081881736双原生架构真实默认入口/HTTP200/105迁移/核心表/compiled地址/adapter34与双索引深验通过；控制器37082367599用GITHUB_TOKEN自动合并到11e2e9d并dispatch37082388229，expected/actual SHA与sourcePR13绑定，正式/latest两包深验通过。BARK_URL已安全配置；真实bot main failure37083060335早期拒绝stale SHA，build/pub跳过、artifacts0，main独立finalizer notifytrue，dry-run0次/真实sent1次/HTTP200及JSONcode200；latest与main不变。check-only probe不通知，临时分支/worktree/文件已清理并核验不存在。139/139、actionlint/AST/JSON/diff通过；strict/admin/verify保护设置未改。全部AC满足。未独立核验手机收件，未更新运行容器/生产数据。",
   "meta": {}
 }
