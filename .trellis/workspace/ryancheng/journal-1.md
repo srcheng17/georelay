@@ -509,3 +509,26 @@ Removed upstream branding edits and legal/visual snapshot gates; only two addres
 ### Status
 
 [OK] **Completed**
+
+
+## Session 17: Beta automatic release and real main failure acceptance
+<!-- trellis-session: v=2 fp=e5a683c905ecaafb -->
+
+**Date**: 2026-10-03
+**Task**: Beta automatic release and real main failure acceptance
+**Branch**: `feat/beta-review-release`
+
+### Summary
+
+PR13 automatically merged by GitHub Actions bot to 11e2e9d after native amd64/arm64 beta startup checks. Bound main dispatch passed actual HTTP200, 105 migrations, packaged adapter34 and stable/latest registry checks. Real bot stale-SHA failure blocked build/publication with zero artifacts; independent CI finalizer sent one verified Bark API notification, latest/main stayed unchanged. BARK_URL configured safely; probe resources removed. Parent/child tasks archived, final bookkeeping kept local; GHCR-only scope, production containers/data unchanged.
+
+### Git Commits
+
+| Hash | Message |
+|------|---------|
+| `9e6ab09` | fix(ci): notify main failures in the dispatched workflow |
+| `a29b268` | docs(ci): record automatic release and failure notification proof |
+
+### Status
+
+[OK] **Completed**
