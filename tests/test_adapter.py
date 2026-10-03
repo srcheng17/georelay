@@ -591,17 +591,19 @@ class AdapterTest(unittest.TestCase):
             else:
                 time.sleep(0.005)
             return AMAP
-        try:
-            with patch("adapter.server.upstream", side_effect=request) as upstream:
+        # lookup cancels queued futures but returns before running workers finish.
+        # Keep their provider mocked until every worker has completed teardown.
+        with patch("adapter.server.upstream", side_effect=request) as upstream:
+            try:
                 started = time.monotonic()
                 self.error(502, self.adapter.lookup, rows, "en", "amap")
                 self.assertLess(time.monotonic() - started, 0.25)
                 self.assertLessEqual(upstream.call_count, 8)
-        finally:
-            release.set()
-            for worker in set(workers):
-                worker.join(timeout=1)
-                self.assertFalse(worker.is_alive())
+            finally:
+                release.set()
+                for worker in set(workers):
+                    worker.join(timeout=1)
+                    self.assertFalse(worker.is_alive())
 
     @patch("adapter.server.upstream", return_value=OSM)
     def test_osm_rate_limit_survives_restart_and_wait_counts_toward_budget(self, upstream):

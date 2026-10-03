@@ -1,0 +1,37 @@
+{
+  "date": "2026-10-03",
+  "authorization": "User explicitly requested push and merge of the current task",
+  "branch": "holy-shrimp",
+  "pr": 15,
+  "pr_url": "https://github.com/srcheng17/georelay/pull/15",
+  "initial_run": {
+    "id": 37103014172,
+    "source": "e1aa334fdb379b6df7e16daa9cfa0e001cdab158",
+    "conclusion": "failure",
+    "architectures": [
+      "amd64",
+      "arm64"
+    ],
+    "stage": "Python checks",
+    "test": "test_nonfirst_failure_is_observed_before_slow_first_item",
+    "assertion": "worker must have exited"
+  },
+  "root_cause": "The test restores upstream before releasing and joining active executor workers; a running later item can enter the real transport after mock teardown. Controlled Linux reproduction with a transport spy proved the escape without external HTTP.",
+  "fix_scope": "Keep upstream mock active through worker release/join; preserve prompt-failure budget, call bound, cancellation and thread-exit assertions. No adapter production change.",
+  "merge_method": "Normal protected PR merge with exact tested head; no admin bypass or protection changes",
+  "pending": [
+    "Updated native amd64/arm64 checks and required verify",
+    "Current PR merge and main push run",
+    "Formal fixed/latest indices and Release readback"
+  ],
+  "production_changes": false,
+  "fix_validation": {
+    "environment": "Final Linux python3.13-slim adapter image, network none",
+    "controlled_race_iterations": 50,
+    "transport_escapes": 0,
+    "adapter_suite_tests": 34,
+    "seconds": 10.419,
+    "resource_warnings": 0,
+    "product_changes": false
+  }
+}
