@@ -55,6 +55,7 @@ class Fixture:
         self.changed_main_after_protection_read = False
         self.main_sha = MAIN
         self.pull_reads = 0
+        self.record_exists = True
         self.images()
 
     def images(self, revision=HEAD, version=VERSION):
@@ -79,7 +80,7 @@ class Fixture:
         self.calls.append((method, path, payload))
         if self.fail == path and not (path.endswith("/merge") and self.fail == "lost_merge_response"):
             raise RuntimeError("private-remote-response")
-        if path == "/actions/runs/10":
+        if path == "/actions/runs/10/attempts/1":
             return copy.deepcopy(self.run)
         if path == "/actions/workflows/ci.yml":
             return copy.deepcopy(self.workflow)
@@ -88,7 +89,7 @@ class Fixture:
             if self.changed_on_last_read and self.pull_reads == 3:
                 self.pull["head"]["sha"] = "d" * 40
             return copy.deepcopy(self.pull)
-        if path == "/actions/runs/10/jobs?filter=latest&per_page=100":
+        if path == "/actions/runs/10/attempts/1/jobs?per_page=100":
             return {"total_count": len(self.jobs), "jobs": copy.deepcopy(self.jobs)}
         if path.startswith("/check-runs/"):
             return copy.deepcopy(self.check)
@@ -127,8 +128,13 @@ class Fixture:
         self.fetches.append((owner, package, reference, kind))
         return self.documents[reference]
 
-    def control(self, apply=True):
-        return control.control(REPO, 10, 1, self.api, self.fetch, apply=apply, sleep=lambda _: None)
+    def record_verify(self, repository, run_id, attempt, source, version, **kwargs):
+        if not self.record_exists or (repository, run_id, attempt, source, version) != (REPO, 10, 1, HEAD, VERSION):
+            raise ValueError("Release record absent or mismatched")
+
+    def control(self, apply=True, repair_run_id=None, repair_verify=None):
+        return control.control(REPO, 10, 1, self.api, self.fetch, apply=apply, sleep=lambda _: None,
+                               record_verify=self.record_verify, repair_run_id=repair_run_id, repair_verify=repair_verify)
 
     def writes(self):
         return [call for call in self.calls if call[0] != "GET"]
@@ -199,6 +205,33 @@ class ReleaseControlTests(unittest.TestCase):
             result = fixture.control()
             self.assertEqual(result["reason"], "beta_jobs")
             self.assertTrue(result["notify"])
+            self.assertEqual(fixture.writes(), [])
+
+    def test_release_record_missing_or_bootstrap_failure_cannot_be_ready(self):
+        fixture = Fixture()
+        fixture.record_exists = False
+        result = fixture.control()
+        self.assertEqual(result["reason"], "release_record")
+        self.assertEqual(fixture.writes(), [])
+        fixture = Fixture()
+        fixture.jobs = [job for job in fixture.jobs if job["name"] != "release-record"]
+        self.assertEqual(fixture.control()["reason"], "beta_jobs")
+        self.assertEqual(fixture.writes(), [])
+
+    def test_only_failed_record_gate_can_be_repaired_other_jobs_still_block(self):
+        fixture = Fixture()
+        fixture.run["conclusion"] = "failure"
+        next(job for job in fixture.jobs if job["name"] == "release-record")["conclusion"] = "failure"
+        proof_calls = []
+        def proof(*args, **kwargs):
+            proof_calls.append(args)
+        self.assertEqual(fixture.control(repair_run_id=99, repair_verify=proof)["status"], "merged_dispatched")
+        self.assertEqual(proof_calls, [(REPO, 10, 1, HEAD, VERSION, 99)])
+        for name in ("publish", "verify", "build-arm64"):
+            fixture = Fixture()
+            fixture.run["conclusion"] = "failure"
+            next(job for job in fixture.jobs if job["name"] == name)["conclusion"] = "failure"
+            self.assertEqual(fixture.control(repair_run_id=99, repair_verify=proof)["reason"], "beta_jobs")
             self.assertEqual(fixture.writes(), [])
 
     def test_registry_incomplete_tampered_or_wrong_oci_source_refuses_merge(self):
@@ -334,7 +367,7 @@ class ReleaseControlTests(unittest.TestCase):
         self.assertTrue(result["notification"]["failed_jobs"])
         self.assertEqual(fixture.fetches, [])
         self.assertEqual(fixture.writes(), [])
-        fixture.fail = "/actions/runs/10/jobs?filter=latest&per_page=100"
+        fixture.fail = "/actions/runs/10/attempts/1/jobs?per_page=100"
         self.assertTrue(fixture.control()["notify"])
 
     def test_main_observer_delegates_all_success_failure_and_stale_paths_before_pr_read(self):
@@ -384,7 +417,7 @@ class ReleaseControlTests(unittest.TestCase):
         self.assertTrue(fixture.control()["notify"])
         self.assertEqual(fixture.writes(), [])
         fixture = Fixture()
-        fixture.fail = "/actions/runs/10"
+        fixture.fail = "/actions/runs/10/attempts/1"
         result = fixture.control()
         self.assertFalse(result["notify"])
         self.assertNotIn("private-remote-response", json.dumps(result))
@@ -399,7 +432,7 @@ class MainFailureTests(unittest.TestCase):
         }}
         self.needs = {"checks": {"result": "success", "outputs": {"image_required": "true"}},
                       "build": {"result": "success"}, "verify": {"result": "success"},
-                      "publish": {"result": "failure"}}
+                      "publish": {"result": "failure"}, "release-record": {"result": "success"}}
         self.environment = {"GITHUB_REPOSITORY": REPO, "GITHUB_REF": "refs/heads/main",
                             "GITHUB_EVENT_NAME": "workflow_dispatch", "GITHUB_SHA": MERGED,
                             "GITHUB_RUN_ID": "10", "GITHUB_RUN_ATTEMPT": "1"}
@@ -420,6 +453,11 @@ class MainFailureTests(unittest.TestCase):
         self.assertEqual(notice["run_url"], "https://github.com/" + REPO + "/actions/runs/10")
         self.assertEqual(self.fixture.calls, [("GET", "/pulls/7", None)])
         self.assertEqual(self.fixture.writes(), [])
+
+    def test_main_record_failure_is_a_real_failure_and_whitelisted_job(self):
+        self.needs["publish"]["result"] = "success"
+        self.needs["release-record"]["result"] = "failure"
+        self.assertEqual(self.report()["notification"]["failed_jobs"], ["release-record"])
 
     def test_stale_expected_main_falls_back_to_basic_actual_run_and_preserves_expected(self):
         self.environment["GITHUB_SHA"] = MAIN
@@ -507,13 +545,13 @@ class MainFailureTests(unittest.TestCase):
             with self.subTest(ref=ref, event=event_name, verify=verify, publication=publication):
                 values = {"github.ref": "refs/heads/" + ref, "github.event_name": event_name,
                           "inputs.publish": publish, "needs.checks.outputs.image_required": image_required,
-                          "needs.verify.result": verify, "needs.publish.result": publication}
+                          "needs.verify.result": verify, "needs.publish.result": publication, "needs.release-record.result": "success"}
                 native_condition = expression
                 for key, value in values.items():
                     native_condition = native_condition.replace(key, repr(value))
                 native_condition = native_condition.replace("&&", "and").replace("||", "or")
                 self.assertEqual(eval(native_condition, {"__builtins__": {}}, {}), expected)
-        self.assertIn("    needs: [checks, build, verify, publish]\n    if: always()", finalizer)
+        self.assertIn("    needs: [checks, build, verify, publish, release-record]\n    if: always()", finalizer)
         self.assertIn("ref: ${{ github.sha }}", finalizer)
         self.assertEqual(finalizer.count("${{ secrets.BARK_URL }}"), 1)
         self.assertNotIn("${{ secrets.BARK_URL }}", finalizer.split("      - name: Notify main publication failure through Bark")[0])

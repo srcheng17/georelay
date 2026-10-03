@@ -6,13 +6,13 @@ Self-hosted drive and charging records with address lookup through AMap, Baidu M
 
 > This project is an unofficial community tool and is not affiliated with, endorsed by, or supported by the official TeslaMate project.
 
-[Getting started](#getting-started) · [Features](#features) · [Screenshots](#screenshots) · [Updates](#updates) · [Documentation](#documentation)
+[Getting started](#getting-started) · [Features](#features) · [Updates](#updates) · [Documentation](#documentation)
 
 ## Getting started
 
 Add `georelay-adapter` to your existing TeslaMate stack and use the patched TeslaMate image. Both images support `linux/amd64` and `linux/arm64`. The official TeslaMate image does not support `NOMINATIM_BASE_URL`.
 
-The `georelay` application and `georelay-adapter` images are publicly available on GHCR. Their names cover all supported address providers. The fragment below uses `latest` by default. To pin a release, set `GEORELAY_VERSION` to the same version from the [application image](https://github.com/users/srcheng17/packages/container/package/georelay) and [adapter image](https://github.com/users/srcheng17/packages/container/package/georelay-adapter) pages.
+The `georelay` application and `georelay-adapter` images are publicly available on GHCR. Their names cover all supported address providers. Choose a matching Release that includes application-owned addresses; earlier images use a different protocol. The fragment below uses `latest` by default. To pin a release, set `GEORELAY_VERSION` to the same version from the [application image](https://github.com/users/srcheng17/packages/container/package/georelay) and [adapter image](https://github.com/users/srcheng17/packages/container/package/georelay-adapter) pages.
 
 Set `AMAP_KEY` and `NOMINATIM_USER_AGENT` in your stack's `.env`; see [.env.example](.env.example). The default uses AMap Web Services in mainland China and OSM elsewhere. The User-Agent must include your application name and contact information. To use Baidu instead, set `MAINLAND_PROVIDER=baidu`, `BAIDU_AK` and the matching `BAIDU_SK`.
 
@@ -24,12 +24,13 @@ services:
     image: ghcr.io/srcheng17/georelay:${GEORELAY_VERSION:-latest}
     environment:
       NOMINATIM_BASE_URL: http://georelay-adapter:8080
-      NOMINATIM_LOCAL_IDENTITIES_ONLY: "true"
+      GEORELAY_ADDRESS_MODE: application
       # Keep your other TeslaMate settings here.
   georelay-adapter:
     image: ghcr.io/srcheng17/georelay-adapter:${GEORELAY_VERSION:-latest}
     restart: unless-stopped
     environment:
+      ADAPTER_CACHE_DB: /data/cache.sqlite3
       GEOCODER_PROVIDER: "${GEOCODER_PROVIDER:-auto}"
       MAINLAND_PROVIDER: "${MAINLAND_PROVIDER:-amap}"
       AMAP_API_REGION: "${AMAP_API_REGION:-mainland}"
@@ -52,11 +53,9 @@ volumes:
 
 Compose's default network lets the two services reach each other. If TeslaMate uses a custom network, add the adapter to that network and keep outbound access to the address services. The adapter does not need a host port.
 
-Keep `amap-data` across restarts and upgrades: it stores persistent address identities as well as cached responses. Read [existing addresses and backups](#existing-addresses-and-backups) before replacing an existing setup. Additional settings are in the [configuration guide (Chinese)](docs/AMAP.md#配置).
+PostgreSQL stores permanent address IDs, original coordinates and provider provenance. The adapter volume holds disposable caches and rate-limit state. Complete [initialization or migration](#existing-addresses-and-backups) before address lookup; retain the existing volume during an upgrade to archive the old identity file. Additional settings are in the [configuration guide (Chinese)](docs/AMAP.md#配置).
 
-If you already use the earlier `teslamate-amap` images, change the two image references to `georelay` and `georelay-adapter` and add the local-identities setting above. Keep your existing Compose project, data volume and sidecar service name; when that name is `amap-adapter`, retain `http://amap-adapter:8080` and use `amap-adapter` in the commands below. Existing image packages remain available, but new releases use the GeoRelay names. `GEORELAY_VERSION` replaces the earlier `TESLAMATE_AMAP_VERSION` example variable.
-
-Publishing a new `latest` does not update running containers. To update, back up your TeslaMate database and adapter data, then run these commands from your stack directory:
+Publishing a new `latest` does not update running containers. To update, back up your TeslaMate database and complete any required identity migration, then run these commands from your stack directory:
 
 ```sh
 docker compose pull teslamate georelay-adapter
@@ -78,85 +77,36 @@ docker build -t georelay-adapter:local adapter
 
 ### Existing addresses and backups
 
-New addresses use permanent local negative IDs. With `NOMINATIM_LOCAL_IDENTITIES_ONLY=true` in the patched application, existing positive IDs are left unchanged and skipped during language refresh, so they cannot block new addresses in the same batch. The adapter does not forward them to OSM: some third-party versions use positive hashes that look like OSM IDs. Importing or repairing those addresses requires a separate migration.
+The application owns stable negative address IDs in PostgreSQL and sends IDs, exact WGS84 coordinates and verified provenance to the adapter. The adapter has no database credentials. Its cache can be deleted or recreated without changing permanent addresses. Historical positive IDs are preserved and skipped during local refresh.
 
-Cache expiry refreshes the adapter's response only. It does not update existing PostgreSQL rows. Changing the address language in the application triggers an explicit refresh of local addresses, including place names, roads, house numbers and raw responses; their IDs and coordinates stay unchanged. AMap and Baidu currently return their default language even when another language is selected.
-
-Back up the adapter's identity database together with your application database. From your actual stack directory, use the same Compose file and project options you use to run that stack:
+For an installation that has never used the old SQLite identity store, start the paired images and explicitly initialize the application:
 
 ```sh
-snapshot="adapter-snapshot-$(date -u +%Y%m%dT%H%M%SZ).sqlite3"
-docker compose exec -T georelay-adapter python -m adapter.server --backup "/data/$snapshot"
-docker compose cp "georelay-adapter:/data/$snapshot" "./$snapshot"
-chmod 600 "./$snapshot"
+docker compose exec -T teslamate bin/teslamate rpc 'IO.inspect(TeslaMate.Locations.LocalIdentities.initialize_fresh(fresh_install: true))'
+docker compose exec -T teslamate bin/teslamate rpc 'IO.inspect(TeslaMate.Locations.LocalIdentities.initialize_fresh(apply: true, fresh_install: true))'
 ```
 
-The backup contains location data. Store it securely off the Docker host, then remove the temporary snapshot inside `/data` when you have verified the copy. The command uses SQLite's online backup API; do not copy the active database file. To restore, stop the adapter and restore the complete identity database that matches your application data before restarting it.
+The first command audits without writing. An empty PostgreSQL address table does not prove a fresh installation. Existing installations must first [audit and import their old identity store (Chinese)](docs/AMAP.md#永久身份与备份). Upgrade both images together; address lookup stays disabled until initialization or import completes.
+
+Cache expiry only refreshes the adapter response. Changing the application's address language explicitly refreshes stored text while preserving IDs, coordinates and drive/charging associations. AMap and Baidu use their service's default language.
+
+Back up PostgreSQL as the permanent data source. Keep the old SQLite snapshot as a migration/rollback archive; the new cache need not be restored alongside the database. After new application-owned IDs are allocated, downgrading images alone cannot safely return to the old identity store. The migration guide explains the matching-backup boundary.
 
 ## Features
 
-Address lookup defaults to AMap in mainland China and OpenStreetMap elsewhere. Set `MAINLAND_PROVIDER=baidu` to use Baidu in mainland China, or `GEOCODER_PROVIDER=amap|baidu|osm` to use a single service. `/reverse` and `/lookup` also accept `provider=amap|baidu|osm` for an individual request. TeslaMate uses the configured default.
+Address lookup defaults to AMap in mainland China and OpenStreetMap elsewhere. Set `MAINLAND_PROVIDER=baidu` to use Baidu in mainland China, or `GEOCODER_PROVIDER=amap|baidu|osm` to use a single service. The versioned POST interfaces also accept a provider field for an individual request. TeslaMate uses the configured default.
 
 Results include place names and address components such as province, city and road. Switching providers keeps the same address identity and original coordinates. Baidu overseas lookup requires the appropriate API permissions. For AMap overseas service, set `GEOCODER_PROVIDER=amap`, `AMAP_API_REGION=global` and provide its Web Service key; the default AMap profile accepts mainland results. The automatic policy uses OSM elsewhere. The [routing notes (Chinese)](docs/AMAP.md#路由与名称) explain regional detection and name selection.
 
 Coordinates remain WGS84 in storage and responses. The adapter converts mainland query coordinates to GCJ-02 for AMap; Baidu accepts WGS84 directly. Address lookup does not change the map tiles in the web interface. TeslaMate continues to manage drive records, charging records and stored addresses.
-
-TeslaMate is written in [Elixir](https://elixir-lang.org/), stores vehicle data in PostgreSQL, uses Grafana for visualization and analysis, and publishes vehicle data to a local [MQTT](https://en.wikipedia.org/wiki/MQTT) broker. The features below are from the [upstream README](https://github.com/teslamate-org/teslamate/blob/33d200b2fba9d5138803916a788cef5eae31b1aa/README.md).
-
-<details>
-<summary>General features</summary>
-
-- High-precision drive recording.
-- Lets the vehicle sleep as soon as possible to avoid extra standby drain.
-- Automatic address lookup and custom geofences.
-- MQTT integration with Home Assistant, Node-RED and Telegram.
-- Multiple vehicles on one Tesla account.
-- Charging cost tracking.
-- Data import from TeslaFi and tesla-apiscraper.
-- Light, dark and system theme modes.
-- A web interface in 19 languages, including Simplified and Traditional Chinese, with English as the fallback for untranslated text.
-
-</details>
-
-<details>
-<summary>Built-in dashboards</summary>
-
-Each link opens the official dashboard documentation and sample screenshots.
-
-- [Battery health](https://docs.teslamate.org/docs/screenshots/#battery-health)
-- [Charge level](https://docs.teslamate.org/docs/screenshots/#charge-level)
-- [Charges](https://docs.teslamate.org/docs/screenshots/#charges)
-- [Charge details](https://docs.teslamate.org/docs/screenshots/#charge-details)
-- [Charging stats](https://docs.teslamate.org/docs/screenshots/#charging-stats)
-- [Database information](https://docs.teslamate.org/docs/screenshots/#database-information)
-- [Drive stats](https://docs.teslamate.org/docs/screenshots/#drive-stats)
-- [Drives](https://docs.teslamate.org/docs/screenshots/#drives)
-- [Drive details](https://docs.teslamate.org/docs/screenshots/#drive-details)
-- [Efficiency](https://docs.teslamate.org/docs/screenshots/#efficiency)
-- [Locations and addresses](https://docs.teslamate.org/docs/screenshots/#location-addresses)
-- [Mileage](https://docs.teslamate.org/docs/screenshots/#mileage)
-- [Overview](https://docs.teslamate.org/docs/screenshots/#overview)
-- [Projected range and battery degradation](https://docs.teslamate.org/docs/screenshots/#projected-range)
-- [Vehicle online and sleep states](https://docs.teslamate.org/docs/screenshots/#states)
-- [Statistics](https://docs.teslamate.org/docs/screenshots/#statistics)
-- [Temperatures](https://docs.teslamate.org/docs/screenshots/#temperatures)
-- [Timeline](https://docs.teslamate.org/docs/screenshots/#timeline)
-- [Trip](https://docs.teslamate.org/docs/screenshots/#trip)
-- [Software update history](https://docs.teslamate.org/docs/screenshots/#updates)
-- [Vampire drain](https://docs.teslamate.org/docs/screenshots/#vampire-drain)
-- [Lifetime driving map](https://docs.teslamate.org/docs/screenshots/#visited-lifetime-driving-map)
-
-</details>
-
-## Screenshots
-
-GeoRelay is the repository and image name. The application keeps the upstream TeslaMate interface, name and icons; its [screenshot documentation](https://docs.teslamate.org/docs/screenshots/) shows these features.
 
 ## Updates
 
 The project checks official stable releases every six hours and creates a PR with a pinned tag and commit. Same-repository PRs and controlled branch publications produce beta images after native amd64/arm64 tests, including the packaged adapter suite and the application's startup, migrations and address contract. Beta images do not update `latest`. Upstream names, translations, assets, legal text and Dockerfile stay unchanged; preparation only applies the address patches. Patch conflicts and failed checks stop publication.
 
 The release controller merges a successful beta candidate only while its tested PR commit and main baseline remain current and branch protection allows it. It then explicitly starts a main build to publish the formal version and `latest`. Main image-affecting changes also publish checked images; README files, guides, agent instructions, Trellis metadata and Paseo settings use lightweight checks. Successful, metadata-only and check-only runs send no notification; image build, test, merge or publication failures send Bark when the repository's `BARK_URL` Actions Secret is configured. The controller must first be reviewed and merged into main before this automation takes effect.
+
+Each verified pair has a [GitHub Release](https://github.com/srcheng17/georelay/releases) with readable GeoRelay changes, exact image digests, source and upstream version. Automatic updates show the old → new TeslaMate version and official change links; beta entries are prereleases. Missing notes can be repaired without rebuilding images. Fixed publication and floating alias results are separate; a failed alias update keeps the workflow failed.
 
 Both images use the same upstream-version and source-commit tag. A PR's floating beta alias is `beta-pr-N`; stable `latest` follows the reviewed pin on main. Publishing images does not update running services. Weekly retention keeps `latest` and the ten newest complete formal releases and their architecture manifests. Beta and other unrecognized records remain protected; beta cleanup is deferred. See the [release guide (Chinese)](docs/AMAP.md#版本跟进与发布) for setup, tags and maintenance.
 

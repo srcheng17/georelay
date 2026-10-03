@@ -6,9 +6,9 @@
 
 用户明确要求真实库核对时，可在 `BEGIN READ ONLY` +有界statement/lock timeout中抽样已结束事件的原始位置及关联地址；原记录仅留内存和隔离临时卷，不输出坐标/地址字符串、不作为fixture、不提交Git。先比较事件坐标与旧address坐标；不同点和不同provider的文字差异不能直接判错，同点地点名退化成道路需单列。省市区/道路、地点名和身份闭环分别验证；查后复读生产对照字段并清理临时资源，不写回或迁移旧身份。
 
-固定 `upstream.json` 中稳定 tag 和解引用 commit，下载到临时/忽略目录；先校验 commit 再 `git apply --check`，任何失败停止。保留上游 LICENSE/NOTICE。GitHub release 检测自动创建仅 pin 变更的上游分支与 PR，并显式触发双架构构建；影响镜像的 main push 通过全部校验后发布正式版本；同仓 PR 和受控分支 publish dispatch 先发布 beta。仅文档、agent/Paseo/Trellis 设置改动运行轻量检查，手动 dispatch 始终完整构建。上游分支必须与 main 相比仅改 upstream.json，并匹配稳定 tag；可信 main 控制器仅按下述 beta 契约条件合并。首次启用本流程的任务 PR 仍须用户明确审阅合并。两架构都检查成功才从已测试产物发布索引，保留单名 verify 汇总检查，不得绕过测试。发布范围仅 GHCR 正式镜像与 latest，不更新运行容器，不 force push。
+固定 `upstream.json` 中稳定 tag 和解引用 commit，下载到临时/忽略目录；先校验 commit，在独立临时 index 中顺序预检整个系列，全部通过后逐个应用，任何失败停止。保留上游 LICENSE/NOTICE。GitHub release 检测自动创建仅 pin 变更的上游分支与 PR，并显式触发双架构构建；影响镜像的 main push 通过全部校验后发布正式版本；同仓 PR 和受控分支 publish dispatch 先发布 beta。仅文档、agent/Paseo/Trellis 设置改动运行轻量检查，手动 dispatch 始终完整构建。上游分支必须与 main 相比仅改 upstream.json，并匹配稳定 tag；可信 main 控制器仅按下述 beta 契约条件合并。首次启用本流程的任务 PR 仍须用户明确审阅合并。两架构都检查成功才从已测试产物发布索引，保留单名 verify 汇总检查，不得绕过测试。发布范围仅 GHCR 正式镜像与 latest，不更新运行容器，不 force push。
 
-共享 prepare 路径仅校验固定 tag/commit 并严格应用两个地址补丁；上游应用保留 TeslaMate 名称、UI、翻译、图标、法律文件与原 Dockerfile。不比对上游法律原文快照、不审核视觉资源、不做名称扫描、不复制品牌资产或追加 Dockerfile 指令。GeoRelay 是仓库/镜像/地址服务项目名，镜像为 georelay 和 georelay-adapter，旧包保留但不再发布新版本。独立 adapter 保留自身许可与修改通知包装。地址模块、数据库和 MQTT 数据契约不借此改动。
+共享 prepare 路径仅校验固定 tag/commit 并严格应用三个地址补丁；上游应用保留 TeslaMate 名称、UI、翻译、图标、法律文件与原 Dockerfile。不比对上游法律原文快照、不审核视觉资源、不做名称扫描、不复制品牌资产或追加 Dockerfile 指令。GeoRelay 是仓库/镜像/地址服务项目名，镜像为 georelay 和 georelay-adapter，旧包保留但不再发布新版本。独立 adapter 保留自身许可与修改通知包装。上游界面与 MQTT 契约保持；应用身份补丁调整地址精度、永久身份与显式导入。
 
 用户已授权维护两镜像的 `latest`。所有发布任务共用 publish job concurrency group；先验证两个版本索引，再复制已测试索引至 latest，不重新构建。推广前校验当前 pin 对应官方稳定 release/tag/commit 并回读源码状态，过期 main 跳过推广，网络/校验失败停止；latest 跟随 main 已审阅 pin，尚未合入的官方新版本不阻断推广。GitHub 队列不保证 FIFO，不能仅凭串行认为版本不会倒退。每个 latest 必须回读为对应版本的同一双架构内容。两个 package 没有原子更新，任一推广或回读失败使 workflow 失败，不能报告双镜像完成。保留固定版本/digest用法；latest本身不会拉取或重建运行容器。
 
@@ -16,7 +16,7 @@
 
 统一补丁的空白上下文行必须保留单个空格前缀；`.gitattributes`只对此类文件关闭blank-at-eol检查，实际应用后的上游源码仍由prepare脚本执行git diff --check。
 
-公开文档以固定上游 README 为基础，保留来源、官方功能和许可；保留本项目独立维护的来源说明，不将上游徽章或发布指标当作本仓库结果。截图链接固定官方 commit，配置与构建细节集中在 `docs/AMAP.md`。修改后检查相对链接、锚点、截图可访问性及配置一致性；公开前覆盖可达 Git 历史、PR、CI 日志和产物的敏感信息审查。文档必须区分已验证、已发布和已部署状态。
+公开文档保留来源与许可；按用户要求删除上游功能/仪表盘/截图和旧镜像改名说明；保留本项目独立维护的来源说明，不将上游徽章或发布指标当作本仓库结果。配置与构建细节集中在 `docs/AMAP.md`。修改后检查相对链接、锚点与配置一致性；公开前覆盖可达 Git 历史、PR、CI 日志和产物的敏感信息审查。文档必须区分已验证、已发布和已部署状态。
 
 README 按使用者需要组织用途、功能和使用入口，验收数字、PR 进度与内部任务记录留在维护材料中。项目介绍不将当前构建版本写成长期定位，具体 tag/commit 链接 `upstream.json`；上游 release 检测、版本更新、CI 构建和镜像发布分别写明触发条件。
 
@@ -90,14 +90,14 @@ README 按使用者需要组织用途、功能和使用入口，验收数字、P
 
 ### 2. Signatures
 
-`bash scripts/test_main_image.sh <app-image> <adapter-probe-image>`；`MAIN_IMAGE_TIMEOUT_SECONDS` 缺省 120，只接受 1..600 整数。CI 使用 `exec bash scripts/test_main_image.sh ...`，step timeout 为 5 分钟。
+`bash scripts/test_main_image.sh <app-image> <adapter-probe-image>`；`MAIN_IMAGE_TIMEOUT_SECONDS` 缺省 120，只接受 1..600 整数；`MAIN_IMAGE_IDENTITY_SCENARIO=fresh|legacy`，缺省 fresh。CI 使用 `exec bash scripts/test_main_image.sh ...`，step timeout 为 5 分钟。
 
 ### 3. Contracts
 
 - 主镜像保留默认 ENTRYPOINT/CMD；连接新建 PostgreSQL 18 tmpfs，入口真实等待数据库并迁移，不预装 schema。
 - 独立 internal 网络与命名容器、虚构测试凭据，无 host port/生产卷；probe 复用已构建 adapter 的 Python 标准库。
 - `/sign_in` 必须 HTTP 200、无跳转、`text/html`，含实际 access/refresh token 登录表单，不耦合上游显示名称；`schema_migrations` 非空且 cars/addresses/positions/drives/charging_processes/settings 表存在。上游 UI、法律端点及 Dockerfile 不新增定制检查；adapter 保留自身许可验证。
-- 同网络 fixture 无外部 provider/Key，挂载的 RPC 检查调用最终 release 编译后的 Locations → Finch → fixture → 新 PG。验证负身份创建/刷新、坐标及行程充电关联保留、历史正身份不变；缺身份/502 明确失败，不写 Unknown、不做 reverse fallback。只输出固定成功标记。adapter suite 在已构建镜像内运行并断言模块来自 /app，只挂 tests、关闭外网。
+- 同网络 fixture 无外部 provider/Key，挂载的 RPC 检查调用最终 release 编译后的 Locations → Finch → fixture → 新 PG。分别运行 fresh/legacy，验证显式初始化、精确负身份创建/刷新、候选竞争、全部旧编号高水位、坐标及行程充电关联保留、历史正身份不变；缺身份/502 明确失败，不写 Unknown、不做 reverse fallback。只输出固定成功标记。adapter suite 在已构建镜像内运行并断言模块来自 /app，只挂 tests、关闭外网。
 - Docker 操作有界且等待可中断；EXIT 清理容器、自动生成的卷和网络，回读确认没有容器残留，三项清理操作各限 2 秒；INT/TERM 先停止当前子进程。只有清理成功才输出通过，诊断只给固定原因与状态/退出码，不输出原始日志或配置。
 
 ### 4. Validation & Error Matrix
@@ -141,10 +141,10 @@ Base：无账号/地图 Key 的新库启动并返回登录页面。Good：损坏
 
 - 正式标签 `<upstream-tag>-georelay-<40hex>`，beta `<upstream-tag>-georelay-beta-<40hex>`；两 package 同标签，架构后缀 -amd64/-arm64，当前 PR alias 为 beta-pr-N。beta 不改 latest、不挤占正式保留十组；未知/beta 记录继续保护，清理延期。
 - publisher 严格校验官方稳定 release 的 tag→commit，OCI source/revision/version 与实际 source一致。浮动标签推广前回读 current PR/main，复制同版本索引并验 digest；任一 package失败则流程失败，不能声称原子双推广。
-- 成功候选必须同仓 open/non-draft、当前 head等于tested SHA、当前 main为head祖先；checks/build-amd64/build-arm64/verify/publish全成功，verify来自 Actions app15368和本run。两 beta索引各恰含linux/amd64、linux/arm64，manifest/config digest与OCI来源一致。
+- 成功候选必须同仓 open/non-draft、当前 head等于tested SHA、当前 main为head祖先；checks/build-amd64/build-arm64/verify/publish/release-record 全成功，verify来自 Actions app15368和本run。两 beta索引各恰含linux/amd64、linux/arm64，manifest/config digest与OCI来源一致。
 - 只读GET /branches/main必须返回name=main、protected=true、protection.enabled=true、required_status_checks.enforcement_level=everyone，且verify唯一绑定Actions app15368；缺字段、读取失败或不符则拒绝merge。默认Actions token无法读取GraphQL branchProtectionRule或REST strict详情（实际FORBIDDEN/403），不新增管理员凭据。main现有strict verify/enforce_admins设置须保留，由GitHub普通merge端原子强制执行；控制器不声称独立读到了摘要未提供的strict标志。控制器不执行候选代码、不加载候选artifacts、不绕过保护；merge前再次回读head/base，普通REST merge携带expected head SHA，正常过期成功候选静默跳过。
 - merge响应丢失先回读，不重复merge；已合并回读后dispatch main，携带expected_main_sha/source_pr。main检出/测试SHA必须等于expected；GITHUB_TOKEN合并push不触发CI，显式dispatch负责正式发布。普通main成功run不递归dispatch。
-- main CI的always收尾job拥有正式失败通知（包含publisher job超时/checkout失败），不能依赖GITHUB_TOKEN dispatch后的workflow_run继续触发：真实bot run完成后未出现observer，而human push/dispatch正常触发。收尾先执行纯布尔通知判断，使beta的该job也是success，兼容all-job成功门禁；只有main publish、非metadata-only且verify/publish未成功时才接触Bark Secret。stable控制器不再发送main通知，避免人工run双发；成功/轻量/check-only/fork仅无Secret判断。
+- main CI的always收尾job拥有正式失败通知（包含publisher job超时/checkout失败），不能依赖GITHUB_TOKEN dispatch后的workflow_run继续触发：真实bot run完成后未出现observer，而human push/dispatch正常触发。收尾先执行纯布尔通知判断，使beta的该job也是success，兼容all-job成功门禁；只有main publish、非metadata-only且verify/publish/release-record 未成功时才接触Bark Secret。stable控制器不再发送main通知，避免人工run双发；成功/轻量/check-only/fork仅无Secret判断。
 - 失败通知独立于成功合并门禁：可信beta早期失败无artifacts也通知；main只读report以actual main merge SHA回读关联已closed/merged同仓PR；关联读取失败/不符保留PR0基本通知，valid expected与actual不一致的失败仍通知。fork/check-only/metadata-only/正常过期成功候选不通知。metadata-only以本run checks中的精确step名 Python checks for metadata-only changes 已执行且非skipped来证明；CI用always()+image_required=false保证前序失败后仍执行。不得仅按build/publish skipped判轻量，因为镜像早期失败也可能跳过。仅固定阶段、SHA、PR/run链接和允许的job名进入payload。
 - Bark先dry-run，HTTP仅loopback测试可用；真实URL须HTTPS，禁止redirect。有界timeout/retry/backoff，2xx且JSON code200才算送达；缺Secret明确not_configured，terminal uncertain不得盲目再发。稳定key不保证Bark服务端去重，跨workflow重跑可能重复。
 
@@ -177,12 +177,12 @@ Base：同仓PR完整双架构验证后只生成beta。Good：当前候选经可
 
 ### Scope / Trigger
 
-适用于 `scripts/prepare_upstream.py`、两个地址补丁及隔离上游测试。
+适用于 `scripts/prepare_upstream.py`、三个地址补丁及隔离上游测试。
 
 ### Contracts
 
-- 入口为 `python3 scripts/prepare_upstream.py DESTINATION`；本地和 CI 共用，固定稳定 tag/commit、严格 `git apply --check` 后应用并执行 `git diff --check`。
-- 生产补丁仅改 HTTP pool、Locations 和 Geocoder。UI、gettext、静态资源、法律文本和 Dockerfile 保持上游原样，不作为本项目额外审核门禁。
+- 入口为 `python3 scripts/prepare_upstream.py DESTINATION`；本地和 CI 共用，固定稳定 tag/commit，独立临时 index 中顺序预检整个系列；全部通过才逐个严格应用并执行 `git diff --check`，验证逆序恢复应等于原始 HEAD tree。
+- 生产补丁只改 HTTP pool、Locations/Geocoder、Address 校验、新身份模块与地址迁移。UI、gettext、静态资源、法律文本和 Dockerfile 保持上游原样，不作为本项目额外审核门禁。
 - 上游测试只验证地址相关 HTTP/Locations/Settings 契约与格式。正常构建仍验证上游工具链、Dockerfile 及其自身输入，不承诺任意上游版本都可构建。
 
 ### Validation
@@ -194,4 +194,57 @@ Base：同仓PR完整双架构验证后只生成beta。Good：当前候选经可
 | 目标目录已有工作 | 拒绝覆盖 |
 | 地址测试、原生构建、架构或非 root/health 失败 | verify 失败，不发布 |
 
-真实 Git fixture 验证非地址文件原样保留和额外门禁移除，固定 pin/冲突/目录保护回归保持；固定上游实际准备后只应修改 3 个地址生产文件与相应测试。云端验证两架构及 verify 的实际结论。
+真实 Git fixture 验证非地址文件原样保留和额外门禁移除，固定 pin/冲突/目录保护回归保持；固定上游实际准备后只应修改上述地址生产文件与相应测试。云端验证两架构及 verify 的实际结论。
+
+## Scenario: Trusted exact-source Release records
+
+### 1. Scope / Trigger
+
+每个已验证的固定双镜像组都记录 exact-source tag/Release，包括过期来源和不推广别名的组。publisher 不持 contents:write，独立 job 检出可信 main writer。首个启用 PR 保持 draft 等待当前任务明确合并批准。
+
+### 2. Signatures
+
+- `python3 scripts/record_release.py --repository OWNER/REPO --run-id ID --attempt N --source SHA --version VERSION [--repair] [--apply] [--output PATH]`；缺省只读，repair 要求原 run completed。
+- `release-only.yml` 在 main dispatch，inputs 为 `original_run_id/original_attempt/original_source/original_version`；无 build/push。
+- `beta-control.yml` 限制重评 inputs 为 `original_run_id/original_attempt/repair_run_id`，复核可信补录后重读当前 PR/head/base/保护。
+- artifact 名 `publication-receipt-<run>-<attempt>-<source>-<version>`，单文件 `publication-receipt.json`。schema1 含 run_id/attempt/source_sha/channel/version/upstream/digests/fixed_verified/floating。
+
+### 3. Contracts
+
+- 固定格式为正式 `<upstream-tag>-georelay-<full-sha>`、beta `<upstream-tag>-georelay-beta-<full-sha>`。tag 指向实际测试源码，已有冲突不移动；beta 为 prerelease。
+- 回读原 attempt 的 run/jobs/verify app15368、官方 pin/tag、两个固定索引与架构标签、OCI 标签、receipt digest；不执行候选代码，候选 notes 仅作有界 UTF-8 文本读取。
+- receipt 原子写入且最多64KiB，ZIP最多1MiB，拒绝多成员/加密/来源不符。artifact 请求保留90天，受仓库上限；缺失/过期拒绝补录，不能猜 floating 结果或重建。
+- fixed_verified 与 floating(tag,status,reason) 分别记录；publisher failure 只接受 floating failed 且固定验证完成。alias 失败仍为总失败，不借成功 Release 豁免。
+- 首次基线选择已证祖先的正式 owned Release，排除自身/beta；无此前发布则注明直接父源码仅作 diff 基线。首次生成后冻结，重试重核 schema/祖先/pin/tag/owned 记录，不能用新 release 重算。
+- adapter/patches 产品变更须带新或内容变化的 `docs/changes/*.md`；纯 rename 旧条目不能满足。pin-only 说明官方旧→新版本及 release/compare；其他维护可用有界 commit 摘要。关联 PR 仅有精确 head/merge 证据时展示，陈旧 PR 不阻断固定记录。
+- owned block 为 `georelay-release-record:start/end`，base64 provenance与正文hash严格校验。人工外围正文保留；仅允许受校验的有限 floating 状态更新。403不能当不存在；响应丢失先读回，不重复创建。
+- GitHub latest 只允许当前 main 正式源码、floating promoted 且两个实际latest digest匹配。补录不推广registry别名。writer/发布/清理共用 publication lock。
+- controller/updater/main finalizer 将 release-record 纳入成功/失败；仅 failed record gate 可由精确原run/attempt的可信成功 repair与Release回读替代，build/verify/publish/alias失败不豁免。updater轮询后显式dispatch受限重评，不能只依赖bot workflow_run。
+- main 尚无可信 writer 时 `bootstrap_not_enabled` 不计 ready；native GITHUB_TOKEN 对修改workflow的beta tag/Release权限留待线上验证，不偷换 PAT/App/tag 源码。
+
+### 4. Validation & Error Matrix
+
+| 条件 | 结果 |
+| --- | --- |
+| fixed pair正确，floating skipped | 记录固定事实，不设GitHub latest |
+| fixed正确，alias失败 | 可记录事实，整体发布仍失败 |
+| receipt缺失/过期/超限、attempt/索引来源不符 | 固定类别失败，零tag/Release写入 |
+| existing tag/owned正文/基线冲突 | 拒绝覆盖 |
+| native token创建tag/Release权限不足 | tag_permission/release_permission，明确失败 |
+| 仅record失败且可信repair成功 | 重读Release及当前PR条件后重评 |
+| build/verify/publish/alias失败 | repair不能使候选ready |
+| stale PR无法关联但fixed证据完整 | 省略PR链接，仍记录fixed Release |
+
+### 5. Good / Base / Bad Cases
+
+Base：完整正式fixed组记录两个digest、平台、源码与原attempt。Good：自动pin-only升级展示上游vA→vB及官方compare；记录失败可无重建补录。Bad：用最新attempt替代原attempt、给候选脚本contents:write、用main tag替代beta源码或把alias失败当总成功。
+
+### 6. Tests Required
+
+`test_publish.py/test_record_release.py/test_release_control.py/test_update_release.py/test_image_context.py/test_notify_bark.py` 验证receipt、有界artifact、冻结/损坏基线、rename、stalePR、人工正文、写后回读、403、repair-only/observer缺失、仅记录门禁替换、main通知。真实shell fake registry与loopback通知保留；云端双架构、匿名拉取、native token/真实Release另留证据。
+
+### 7. Wrong vs Correct
+
+错误：固定成功后过期早退不记录，或补录重建镜像。正确：保存结构化receipt，可信main只验证现有fixed组并写精确源码Release。
+
+错误：Release成功覆盖alias失败或放行当前启用PR。正确：独立门禁，当前任务仍需明确审阅合并。

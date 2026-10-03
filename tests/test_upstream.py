@@ -107,6 +107,21 @@ class PrepareUpstreamTests(unittest.TestCase):
                 self.assertEqual(upstream.git(destination, "diff", "--name-only"), "value")
                 self.assertEqual(upstream.git(destination, "ls-files", "--others", "--exclude-standard"), "")
 
+    def test_ordered_patches_on_the_same_file_and_new_migration_apply_together(self):
+        (self.source / "value").write_text("after\n")
+        upstream.git(self.source, "add", "value")
+        (self.source / "value").write_text("final\n")
+        migration = self.source / "elixir/priv/repo/migrations/fixture.exs"
+        migration.parent.mkdir(parents=True)
+        migration.write_text("address-only migration\n")
+        upstream.git(self.source, "add", "-N", str(migration))
+        (self.patches / "002.patch").write_text(upstream.git(self.source, "diff") + "\n")
+        upstream.git(self.source, "reset", "--hard", "HEAD")
+        self.prepare()
+        self.assertEqual((self.destination / "value").read_text(), "final\n")
+        upstream.verify_patched(self.destination, self.patches, self.pin_path)
+        self.assertEqual((self.destination / "elixir/priv/repo/migrations/fixture.exs").read_text(), "address-only migration\n")
+
     def test_moved_tag_stops_before_checkout_and_patch(self):
         self.pin["commit"] = "0" * 40
         self.pin_path.write_text(json.dumps(self.pin))
@@ -119,6 +134,21 @@ class PrepareUpstreamTests(unittest.TestCase):
         with self.assertRaises(subprocess.CalledProcessError):
             self.prepare()
         self.assertEqual((self.destination / "value").read_text(), "before\n")
+
+    def test_later_conflict_keeps_every_earlier_patch_unapplied(self):
+        (self.patches / "002.patch").write_text(self.patch_file.read_text().replace("-before", "-missing"))
+        with self.assertRaises(subprocess.CalledProcessError):
+            self.prepare()
+        self.assertEqual((self.destination / "value").read_text(), "before\n")
+        self.assertEqual(upstream.git(self.destination, "diff", "--name-only"), "")
+
+    def test_exact_patch_verification_rejects_other_source_changes(self):
+        self.prepare()
+        upstream.verify_patched(self.destination, self.patches, self.pin_path)
+        (self.destination / "Dockerfile").write_text("FROM secret-fixture\n")
+        with self.assertRaisesRegex(ValueError, "expected patch series"):
+            upstream.verify_patched(self.destination, self.patches, self.pin_path)
+        self.assertEqual((self.destination / "Dockerfile").read_text(), "FROM secret-fixture\n")
 
     def test_existing_work_is_never_overwritten(self):
         self.destination.mkdir()

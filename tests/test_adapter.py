@@ -100,11 +100,21 @@ def serving(http):
         thread.join(timeout=3)
 
 
+def address(identity=-1, lat=LAT, lon=LON, context=None):
+    return {"osm_id": identity, "osm_type": "node", "lat": server.coordinate(lat, 90),
+            "lon": server.coordinate(lon, 180), "context": context or {"outside_mainland": False}}
+
+
+def from_response(body):
+    context = {key: value for key, value in body["georelay"].items() if key != "version"}
+    return address(body["osm_id"], body["lat"], body["lon"], context)
+
+
 class AdapterTest(unittest.TestCase):
     def setUp(self):
         self.temp = tempfile.TemporaryDirectory()
         self.addCleanup(self.temp.cleanup)
-        self.db_path = Path(self.temp.name) / "adapter.sqlite3"
+        self.db_path = Path(self.temp.name) / "cache.sqlite3"
         self.adapter = server.Adapter(self.db_path, "fake-test-key", user_agent=USER_AGENT)
 
     def error(self, status, function, *args):
@@ -123,7 +133,11 @@ class AdapterTest(unittest.TestCase):
         self.assertEqual(server.coordinate("-0.000", 90), "0")
         precise = "39.123456789012345678901234567890123456789"
         self.assertEqual(server.coordinate(precise, 90), precise)
-        for value in [None, "nan", "NaN", "Infinity", " 3", "3 ", "--1", "90.0000000000000000000000000000000000001", "1e-999"]:
+        tiny = "0." + "0" * 1023 + "1"
+        self.assertEqual(server.coordinate("1e-1024", 90), tiny)
+        self.assertEqual(server.coordinate(tiny, 90), tiny)
+        self.error(400, server.coordinate, "1." + "1" * 1024, 90)
+        for value in [None, "nan", "NaN", "Infinity", " 3", "3 ", "--1", "90.0000000000000000000000000000000000001", "1e-1025"]:
             self.error(400, server.coordinate, value, 90)
 
     def test_gcj02_known_vector_and_outside_guard(self):
@@ -157,102 +171,6 @@ class AdapterTest(unittest.TestCase):
         payload["result"]["formatted_address"] = []
         self.error(502, server.baidu_address, payload, 1, LAT, LON)
 
-    def test_provider_switches_keep_identity_and_isolate_policy_cache_and_osm_routing(self):
-        self.adapter.baidu_ak, self.adapter.baidu_sk = "yourak", "yoursk"
-        mainland_osm = copy.deepcopy(OSM)
-        mainland_osm["address"] = {"country": "中国", "country_code": "cn", "city": "北京市"}
-        with patch("adapter.server.upstream", return_value=AMAP) as upstream:
-            original = self.adapter.reverse(LAT, LON)
-            self.assertEqual(upstream.call_count, 1)
-        with patch("adapter.server.upstream", return_value=BAIDU) as upstream:
-            baidu = self.adapter.reverse(LAT, LON, provider="baidu")
-            self.assertEqual(upstream.call_args.args[0], "baidu")
-            self.assertEqual(upstream.call_args.args[-1], "yoursk")
-        with patch.object(self.adapter, "osm", return_value=mainland_osm):
-            osm = self.adapter.reverse(LAT, LON, provider="osm")
-        self.assertEqual([body["osm_id"] for body in [original, baidu, osm]], [-1, -1, -1])
-        with self.adapter.connect() as db:
-            self.assertEqual(db.execute("SELECT source_osm_type,source_osm_id,outside_mainland FROM identities").fetchall(), [("way", 123, 0)])
-            self.assertEqual({row[0] for row in db.execute("SELECT policy FROM cache")}, {"auto:amap", "baidu", "osm"})
-        # A valid fixed-OSM source is provenance, not evidence of being overseas.
-        self.expire()
-        with patch("adapter.server.upstream", return_value=AMAP) as upstream:
-            self.assertEqual(self.adapter.lookup("N-1")[0]["upstream"]["provider"], "amap")
-            self.assertEqual(upstream.call_count, 1)
-            self.assertEqual(upstream.call_args.args[0], "amap")
-        with patch("adapter.server.upstream", return_value=BAIDU) as upstream:
-            self.assertEqual(self.adapter.lookup("N-1", provider="baidu")[0]["osm_id"], -1)
-            self.assertEqual(upstream.call_count, 1)  # No OSM batch for fixed Baidu.
-        restarted = server.Adapter(self.db_path, "fake-test-key", user_agent=USER_AGENT,
-                                   mainland_provider="baidu", baidu_ak="yourak", baidu_sk="yoursk")
-        with patch("adapter.server.upstream", return_value=BAIDU) as upstream:
-            self.assertEqual(restarted.lookup("N-1")[0]["upstream"]["provider"], "baidu")
-            self.assertEqual(upstream.call_count, 1)  # auto:baidu differs from fixed baidu.
-            self.assertEqual(restarted.lookup("N-1", provider="baidu")[0]["osm_id"], -1)
-            self.assertEqual(upstream.call_count, 1)
-        with restarted.connect() as db:
-            self.assertEqual(db.execute("SELECT id,lat,lon,source_osm_id,outside_mainland FROM identities").fetchall(), [(1, LAT, "116.39747", 123, 0)])
-
-    def test_fixed_providers_and_auto_baidu_coverage_failures(self):
-        fixed = server.Adapter(self.db_path, provider="baidu", baidu_ak="yourak", baidu_sk="yoursk")
-        foreign = copy.deepcopy(BAIDU)
-        foreign["result"]["addressComponent"].update({"country": "France", "country_code_iso2": "FR", "province": []})
-        with patch("adapter.server.upstream", return_value=foreign) as upstream:
-            result = fixed.reverse(OSM_LAT, OSM_LON)
-            self.assertEqual(result["address"]["country_code"], "fr")
-            self.assertEqual(upstream.call_count, 1)
-        self.expire()
-        fixed.baidu_sk = ""
-        self.error(503, fixed.lookup, "N-1")
-        fixed.baidu_sk = "yoursk"
-        with patch("adapter.server.upstream", return_value={"status": 302, "message": "private text"}):
-            self.error(502, fixed.lookup, "N-1")
-        self.adapter.mainland_provider = "baidu"
-        self.adapter.baidu_ak, self.adapter.baidu_sk = "yourak", "yoursk"
-        mainland_osm = copy.deepcopy(OSM)
-        mainland_osm["address"]["country_code"] = "cn"
-        with patch("adapter.server.upstream", return_value={"status": 1}), patch.object(self.adapter, "osm", return_value=mainland_osm):
-            self.error(502, self.adapter.reverse, LAT, LON)
-        with patch("adapter.server.upstream", return_value=foreign), patch.object(self.adapter, "osm", return_value=OSM):
-            result = self.adapter.reverse("37.5665", "126.978")
-            self.assertEqual(result["upstream"]["provider"], "osm")
-            self.assertEqual(result["address"]["country_code"], "fr")
-        for parts in [{"province": [], "country": [], "country_code_iso2": []},
-                      {"province": "未知地区", "country": "中国", "country_code_iso2": "CN"}]:
-            unknown = copy.deepcopy(BAIDU)
-            unknown["result"]["addressComponent"] = parts
-            self.error(502, server.mainland_response, unknown, "baidu")
-        for region in ["香港特别行政区", "澳门特别行政区", "台湾省"]:
-            overseas = copy.deepcopy(BAIDU)
-            overseas["result"]["addressComponent"]["province"] = region
-            self.assertFalse(server.mainland_response(overseas, "baidu"))
-
-    def test_amap_explicit_global_region_and_mainland_coverage_keep_separate_caches(self):
-        fixed = server.Adapter(self.db_path, "fake-test-key", provider="amap")
-        foreign = copy.deepcopy(AMAP)
-        foreign["regeocode"]["addressComponent"].update({"country": "Japan", "province": []})
-        with patch("adapter.server.upstream", return_value=foreign) as upstream, patch.object(fixed, "osm") as osm:
-            self.error(502, fixed.reverse, "35.65858", "139.74543")
-            self.assertEqual(upstream.call_count, 1)
-            self.assertEqual(len(upstream.call_args.args), 7)
-            osm.assert_not_called()
-        global_adapter = server.Adapter(self.db_path, "fake-test-key", provider="amap", amap_region="global")
-        with patch("adapter.server.upstream", return_value=foreign) as upstream:
-            result = global_adapter.reverse("35.65858", "139.74543")
-            self.assertEqual(upstream.call_count, 1)
-            self.assertEqual(upstream.call_args.args[-1], "global")
-            self.assertEqual(result["address"]["country"], "Japan")
-            self.assertNotIn("country_code", result["address"])
-            self.assertEqual((result["osm_id"], result["lat"], result["lon"]), (-1, "35.65858", "139.74543"))
-        with patch("adapter.server.upstream", return_value=AMAP) as upstream:
-            self.assertEqual(fixed.reverse("35.65858", "139.74543")["osm_id"], -1)
-            self.assertEqual(upstream.call_count, 1)  # global cached text is not a mainland cache hit.
-        with global_adapter.connect() as db:
-            self.assertEqual({row[0] for row in db.execute("SELECT policy FROM cache")}, {"amap", "amap:global"})
-        unknown = copy.deepcopy(AMAP)
-        unknown["regeocode"]["addressComponent"] = {"province": [], "country": []}
-        self.error(502, server.mainland_response, unknown)
-
     def test_amap_name_uses_first_aoi_then_first_poi_then_existing_fallbacks(self):
         cases = [
             ([{"name": " 虚构园区甲 "}], [{"name": "虚构设施乙"}], "虚构楼宇", "虚构小区", "测试路", "虚构园区甲"),
@@ -274,162 +192,6 @@ class AdapterTest(unittest.TestCase):
                 self.assertEqual(result["name"], expected)
                 self.assertEqual(result["namedetails"]["name"], expected)
 
-    @patch("adapter.server.upstream", return_value=AMAP)
-    def test_reverse_lookup_restart_language_ttl_and_original_wgs84(self, upstream):
-        first = self.adapter.reverse(LAT, LON, "zh-cn")
-        self.assertEqual((first["lat"], first["lon"]), (LAT, "116.39747"))
-        self.assertEqual((first["osm_type"], first["osm_id"]), ("node", -1))
-        self.assertEqual(first["address"]["city"], "北京市")
-        self.assertEqual(first["address"]["road"], "测试路")
-        self.assertNotIn("neighbourhood", first["address"])
-        self.assertEqual(self.adapter.reverse(LAT, "1.1639747e2", "zh-cn"), first)
-        self.assertEqual(upstream.call_count, 1)
-        restarted = server.Adapter(self.db_path, "fake-test-key", user_agent=USER_AGENT)
-        self.assertEqual(restarted.lookup("N-1", "zh-cn"), [first])
-        self.assertEqual(upstream.call_count, 1)
-        self.assertEqual(restarted.lookup("N-1", "en")[0]["osm_id"], -1)
-        self.assertEqual(upstream.call_count, 2)
-        self.expire()
-        self.assertEqual(restarted.lookup("N-1", "zh-cn")[0]["osm_id"], -1)
-        self.assertEqual(upstream.call_count, 3)
-        with self.adapter.connect() as db:
-            self.assertEqual(db.execute("SELECT id,lat,lon FROM identities").fetchall(), [(1, LAT, "116.39747")])
-
-    @patch("adapter.server.upstream", return_value=AMAP)
-    def test_concurrent_reverse_assigns_one_identity(self, upstream):
-        adapters = [server.Adapter(self.db_path, "fake-test-key") for _ in range(4)]
-        with concurrent.futures.ThreadPoolExecutor(max_workers=8) as pool:
-            results = list(pool.map(lambda index: adapters[index % 4].reverse(LAT, LON), range(24)))
-        self.assertEqual({row["osm_id"] for row in results}, {-1})
-        second = self.adapter.reverse("39.90", LON)
-        self.assertEqual(second["osm_id"], -2)
-        with self.adapter.connect() as db:
-            self.assertEqual(db.execute("SELECT count(*) FROM identities").fetchone()[0], 2)
-
-    @patch("adapter.server.upstream", return_value=AMAP)
-    def test_lookup_validates_entire_batch_and_never_returns_foreign_identity(self, upstream):
-        first = self.adapter.reverse(LAT, LON)
-        calls = upstream.call_count
-        for value, status in [("N12,N-1,N-999", 404), ("W-1", 422), ("R-20", 422),
-                              ("N-0", 400), ("N-01", 400), ("N-9223372036854775808", 400),
-                              ("N0", 400), ("W01", 400), ("R9223372036854775808", 400),
-                              ("N" + "9" * 100, 400), ("N+1", 400), ("N１", 400),
-                              ("N-1,", 400), ("n-1", 400), ("N-1," * 50 + "N-1", 400)]:
-            self.error(status, self.adapter.lookup, value)
-        self.assertEqual(upstream.call_count, calls)
-        self.assertEqual(self.adapter.lookup("N-1,N-1"), [first])
-        self.assertEqual(self.adapter.lookup(""), [])
-
-    @patch("adapter.server.upstream", return_value=AMAP)
-    def test_lookup_skips_positive_history_and_refreshes_local_ids_in_request_order(self, upstream):
-        first = self.adapter.reverse(LAT, LON)
-        second = self.adapter.reverse("39.9", LON)
-        self.expire()
-        upstream.reset_mock()
-        refreshed = self.adapter.lookup("W123,N-2,N12,R20,N-1,N-2", "en")
-        self.assertEqual(refreshed, [second, first])
-        self.assertEqual(upstream.call_count, 2)
-        self.assertEqual({call.args[0] for call in upstream.call_args_list}, {"amap"})
-        upstream.reset_mock()
-        self.assertEqual(self.adapter.lookup(f"N12,W123,R{server.MAX_ID}"), [])
-        self.assertEqual(self.adapter.lookup("N12,W123,R20", provider="osm"), [])
-        upstream.assert_not_called()
-
-    @patch("adapter.server.upstream", return_value=AMAP)
-    def test_cache_missing_key_and_upstream_failures_never_become_unknown(self, upstream):
-        first = self.adapter.reverse(LAT, LON)
-        self.adapter.key = ""
-        self.assertEqual(self.adapter.lookup("N-1"), [first])
-        self.expire()
-        self.error(503, self.adapter.lookup, "N-1")
-        self.adapter.key = "fake-test-key"
-        upstream.side_effect = server.AdapterError(504, "Upstream request timed out")
-        self.error(504, self.adapter.lookup, "N-1")
-        upstream.side_effect = None
-        for payload in [{"status": "0", "info": "private text"}, {"error": "Unable to geocode"}, {"status": "1", "regeocode": []}, []]:
-            upstream.return_value = payload
-            self.error(502, self.adapter.lookup, "N-1")
-        with self.adapter.connect() as db:
-            self.assertEqual(db.execute("SELECT id FROM identities").fetchall(), [(1,)])
-
-    @patch("adapter.server.upstream", return_value=OSM)
-    def test_overseas_needs_no_amap_key_and_retains_local_identity_and_wgs84(self, upstream):
-        self.adapter.key = ""
-        result = self.adapter.reverse(OSM_LAT, OSM_LON, "fr")
-        self.assertEqual(result["osm_id"], -1)
-        self.assertEqual(result["osm_type"], "node")
-        self.assertEqual((result["lat"], result["lon"]), (OSM_LAT, OSM_LON))
-        self.assertEqual(result["upstream"]["osm_id"], 123)
-        self.assertEqual(upstream.call_args.args[:6], ("osm", "", OSM_LAT, OSM_LON, "fr", USER_AGENT))
-        self.adapter.user_agent = ""
-        self.assertEqual(self.adapter.lookup("N-1", "fr"), [result])
-        self.expire()
-        self.error(503, self.adapter.lookup, "N-1", "fr")
-
-    @patch("adapter.server.upstream")
-    def test_amap_border_result_falls_back_osm_without_changing_identity(self, upstream):
-        upstream.return_value = AMAP
-        first = self.adapter.reverse(LAT, LON)
-        self.expire()
-        upstream.reset_mock()
-        first = copy.deepcopy(AMAP)
-        first["regeocode"]["addressComponent"]["province"] = "香港特别行政区"
-        upstream.side_effect = [first, OSM]
-        result = self.adapter.reverse(LAT, LON)
-        self.assertEqual(result["osm_id"], -1)
-        self.assertEqual([call.args[0] for call in upstream.call_args_list], ["amap", "osm"])
-        self.expire()
-        upstream.side_effect = [[OSM]]
-        self.assertEqual(self.adapter.lookup("N-1")[0]["osm_id"], -1)
-        self.assertEqual(upstream.call_args.args[-1], "W123")
-        wrong_country = copy.deepcopy(AMAP)
-        wrong_country["regeocode"]["addressComponent"]["country"] = "Japan"
-        self.assertFalse(server.mainland_response(wrong_country))
-
-    def test_inside_bbox_foreign_confirmation_and_mainland_errors(self):
-        # These overseas cities are inside the conventional GCJ mathematical box.
-        for index, (lat, lon, country) in enumerate([
-            ("37.5665", "126.978", "kr"), ("34.6937", "135.5023", "jp"),
-            ("1.3521", "103.8198", "sg"), ("13.7563", "100.5018", "th"),
-        ]):
-            foreign = copy.deepcopy(OSM)
-            foreign["address"]["country_code"] = country
-            with patch.object(self.adapter, "osm", return_value=foreign), patch("adapter.server.upstream", side_effect=server.AdapterError(504, "Upstream request timed out")) as upstream:
-                result = self.adapter.reverse(lat, lon)
-                self.assertEqual(result["osm_id"], -(index + 1))
-                self.assertEqual(result["address"]["country_code"], country)
-                self.assertEqual(upstream.call_count, 1)
-                self.expire()
-                self.assertEqual(self.adapter.reverse(lat, lon)["osm_id"], result["osm_id"])
-                self.assertEqual(upstream.call_count, 1)  # Trusted provenance bypasses AMap.
-        self.adapter.key = ""
-        mainland = copy.deepcopy(OSM)
-        mainland["address"]["country_code"] = "cn"
-        with patch.object(self.adapter, "osm", return_value=mainland):
-            self.error(503, self.adapter.reverse, LAT, LON)
-        self.adapter.key = "fake-test-key"
-        with patch.object(self.adapter, "osm", return_value=mainland), patch("adapter.server.upstream", side_effect=server.AdapterError(504, "Upstream request timed out")):
-            self.error(504, self.adapter.reverse, LAT, LON)
-        self.adapter.key = ""
-        for code in ["", "?", "china"]:
-            mainland["address"]["country_code"] = code
-            with patch.object(self.adapter, "osm", return_value=mainland):
-                self.error(503, self.adapter.reverse, LAT, LON)
-        for lat, lon, country, region in [("37.5", "126.98", "kr", ""),
-                                           ("25.033", "121.5654", "tw", ""),
-                                           ("22.3193", "114.1694", "cn", "CN-HK"),
-                                           ("22.1987", "113.5439", "cn", "CN-MO")]:
-            foreign = copy.deepcopy(OSM)
-            foreign["address"].update({"country_code": country, "ISO3166-2-lvl3": region})
-            started = time.monotonic()
-            with patch.object(self.adapter, "osm", return_value=foreign) as osm, patch("adapter.server.upstream") as upstream:
-                result = self.adapter.reverse(lat, lon)
-                self.assertEqual(result["address"]["country_code"], country)
-                self.assertEqual((result["lat"], result["lon"]), (lat, lon))
-                upstream.assert_not_called()
-            self.assertGreater(osm.call_args.args[-1] - started, 16.9)
-            self.assertLess(osm.call_args.args[-1] - started, 17.1)
-
     def test_hong_kong_macao_country_cn_require_iso_subdivision(self):
         for region in ["CN-HK", "CN-MO"]:
             payload = copy.deepcopy(OSM)
@@ -438,147 +200,8 @@ class AdapterTest(unittest.TestCase):
         payload["address"]["ISO3166-2-lvl3"] = "CN-GD"
         self.error(502, server.require_outside_mainland, payload, server.AdapterError(502, "Not confirmed"))
 
-    def test_fifty_cold_osm_lookup_uses_one_verified_batch_and_preserves_all_ids(self):
-        originals = []
-        for index in range(50):
-            payload = copy.deepcopy(OSM)
-            payload["osm_id"] = index if index else 1  # First two locals share one OSM object.
-            with patch.object(self.adapter, "osm", return_value=payload):
-                originals.append(self.adapter.reverse(f"48.{index:06d}", OSM_LON, "fr"))
-        self.expire()
-        restarted = server.Adapter(self.db_path, user_agent=USER_AGENT)
-        responses = [{**OSM, "osm_id": index} for index in range(1, 50)]
-        ids = ",".join("N" + str(item["osm_id"]) for item in originals)
-        with patch("adapter.server.upstream", return_value=list(reversed(responses))) as upstream:
-            refreshed = restarted.lookup(ids, "en")
-        self.assertEqual(upstream.call_count, 1)
-        self.assertEqual(set(upstream.call_args.args[-1].split(",")), {f"W{index}" for index in range(1, 50)})
-        self.assertEqual([(item["osm_id"], item["lat"], item["lon"]) for item in refreshed],
-                         [(item["osm_id"], item["lat"], item["lon"]) for item in originals])
-
-    def test_fifty_cold_mainland_lookups_finish_with_bounded_parallelism(self):
-        with patch("adapter.server.upstream", return_value=AMAP):
-            originals = [self.adapter.reverse(f"39.{index:06d}", LON) for index in range(50)]
-        requested = list(reversed(originals))
-        ids = ",".join("N" + str(item["osm_id"]) for item in requested)
-        self.adapter.lookup_timeout = 5  # Success budget includes SQLite and runner scheduling.
-        self.adapter.baidu_ak, self.adapter.baidu_sk = "yourak", "yoursk"
-        for provider, payload in [("amap", AMAP), ("baidu", BAIDU)]:
-            with self.subTest(provider=provider):
-                self.adapter.mainland_provider = provider
-                self.expire()
-                active = peak = 0
-                lock = threading.Lock()
-                def delayed(*args):
-                    nonlocal active, peak
-                    with lock:
-                        active += 1
-                        peak = max(peak, active)
-                    try:
-                        time.sleep(0.035 if int(args[2][-1]) % 2 else 0.045)
-                        return payload
-                    finally:
-                        with lock:
-                            active -= 1
-                started = time.monotonic()
-                with patch("adapter.server.upstream", side_effect=delayed) as upstream:
-                    refreshed = self.adapter.lookup(ids, "en")
-                self.assertLess(time.monotonic() - started, self.adapter.lookup_timeout)
-                self.assertEqual(upstream.call_count, 50)
-                self.assertEqual({call.args[0] for call in upstream.call_args_list}, {provider})
-                self.assertGreater(peak, 1)
-                self.assertLessEqual(peak, 4)
-                self.assertEqual([(item["osm_id"], item["lat"], item["lon"]) for item in refreshed],
-                                 [(item["osm_id"], item["lat"], item["lon"]) for item in requested])
-
-    def test_osm_batch_rejects_missing_duplicate_and_unrequested_identity(self):
-        with patch.object(self.adapter, "osm", return_value=OSM):
-            self.adapter.reverse(OSM_LAT, OSM_LON, "fr")
-            self.adapter.reverse("48.85", OSM_LON, "fr")
-        for payload in [[], [OSM, OSM], [{**OSM, "osm_id": 999}], {"error": "Unable to geocode"}]:
-            with patch.object(self.adapter, "osm", return_value=payload):
-                self.error(502, self.adapter.lookup, "N-1,N-2", "en")
-        with self.adapter.connect() as db:
-            self.assertEqual(db.execute("SELECT count(*) FROM cache WHERE language='en'").fetchone()[0], 0)
-
-    def test_legacy_schema_migration_preserves_ids(self):
-        legacy = Path(self.temp.name) / "legacy.sqlite3"
-        with sqlite3.connect(legacy) as db:
-            db.execute("CREATE TABLE identities (id INTEGER PRIMARY KEY AUTOINCREMENT, lat TEXT NOT NULL, lon TEXT NOT NULL, UNIQUE(lat,lon))")
-            db.execute("INSERT INTO identities VALUES(10001,?,?)", (LAT, LON))
-        adapter = server.Adapter(legacy, "fake-test-key")
-        with patch("adapter.server.upstream", return_value=AMAP):
-            self.assertEqual(adapter.lookup("N-10001")[0]["osm_id"], -10001)
-            self.assertEqual(adapter.reverse("39.9", LON)["osm_id"], -10002)
-
-    def test_old_cache_and_overseas_evidence_migrate_once_without_rebuilding_identities(self):
-        legacy = Path(self.temp.name) / "legacy-cache.sqlite3"
-        body = server.osm_address(OSM, 10001, OSM_LAT, OSM_LON)
-        with sqlite3.connect(legacy) as db:
-            db.execute("CREATE TABLE identities (id INTEGER PRIMARY KEY AUTOINCREMENT, lat TEXT NOT NULL, lon TEXT NOT NULL, source_osm_id INTEGER, source_osm_type TEXT, UNIQUE(lat,lon))")
-            db.execute("INSERT INTO identities VALUES(10001,?,?,123,'way')", (OSM_LAT, OSM_LON))
-            db.execute("CREATE TABLE cache (identity INTEGER NOT NULL REFERENCES identities(id), language TEXT NOT NULL, expires REAL NOT NULL, body TEXT NOT NULL, PRIMARY KEY(identity,language))")
-            db.execute("INSERT INTO cache VALUES(10001,'fr',?,?)", (time.time() + 3600, json.dumps(body)))
-        migrated = server.Adapter(legacy, user_agent=USER_AGENT)
-        with patch("adapter.server.upstream") as upstream:
-            self.assertEqual(migrated.lookup("N-10001", "fr"), [body])
-            upstream.assert_not_called()
-        with migrated.connect() as db:
-            self.assertEqual(db.execute("SELECT id,lat,lon,outside_mainland FROM identities").fetchall(), [(10001, OSM_LAT, OSM_LON, 1)])
-            self.assertEqual(db.execute("SELECT identity,language,policy FROM cache").fetchall(), [(10001, "fr", "auto:amap")])
-            db.execute("UPDATE cache SET expires=0")
-        with patch.object(migrated, "osm", return_value=[OSM]) as osm:
-            self.assertEqual(migrated.lookup("N-10001", "de")[0]["osm_id"], -10001)
-            self.assertEqual(osm.call_args.args[-1], "W123")
-        mainland_osm = copy.deepcopy(OSM)
-        mainland_osm["address"]["country_code"] = "cn"
-        with patch.object(migrated, "osm", return_value=mainland_osm):
-            self.assertEqual(migrated.reverse(LAT, LON, provider="osm")["osm_id"], -10002)
-        restarted = server.Adapter(legacy, "fake-test-key", user_agent=USER_AGENT)
-        with restarted.connect() as db:
-            self.assertEqual(db.execute("SELECT id,outside_mainland FROM identities ORDER BY id").fetchall(), [(10001, 1), (10002, 0)])
-        with patch("adapter.server.upstream", return_value=AMAP) as upstream:
-            self.assertEqual(restarted.lookup("N-10002")[0]["upstream"]["provider"], "amap")
-            self.assertEqual(upstream.call_count, 1)
-
-    def test_fixed_osm_batch_accepts_mainland_and_keeps_coverage_evidence_separate(self):
-        mainland = copy.deepcopy(OSM)
-        mainland["address"]["country_code"] = "cn"
-        with patch.object(self.adapter, "osm", return_value=mainland):
-            self.adapter.reverse(LAT, LON, provider="osm")
-            self.adapter.reverse("39.9", LON, provider="osm")
-        self.expire()
-        fixed = server.Adapter(self.db_path, user_agent=USER_AGENT, provider="osm")
-        with patch.object(fixed, "osm", return_value=[mainland]) as osm:
-            refreshed = fixed.lookup("N-1,N-2", "fr")
-            self.assertEqual(osm.call_count, 1)
-            self.assertEqual(osm.call_args.args[-1], "W123")
-            self.assertEqual([item["osm_id"] for item in refreshed], [-1, -2])
-        with fixed.connect() as db:
-            self.assertEqual(db.execute("SELECT outside_mainland FROM identities").fetchall(), [(0,), (0,)])
-
-    @patch("adapter.server.upstream")
-    def test_osm_serialization_and_budget_include_rate_wait(self, upstream):
-        starts = []
-        def request(*args):
-            starts.append(time.monotonic())
-            return OSM
-        upstream.side_effect = request
-        other = server.Adapter(self.db_path, user_agent=USER_AGENT)
-        with concurrent.futures.ThreadPoolExecutor(max_workers=2) as pool:
-            list(pool.map(lambda adapter: adapter.reverse(OSM_LAT, OSM_LON), [self.adapter, other]))
-        # Concurrent identical cache fills may coalesce naturally; force a miss.
-        if len(starts) == 1:
-            self.adapter.reverse(OSM_LAT, OSM_LON, "fr")
-        self.assertGreaterEqual(starts[1] - starts[0], 0.99)
-        self.adapter.lookup_timeout = 0.1
-        started = time.monotonic()
-        self.error(504, self.adapter.lookup, "N-1", "de")
-        self.assertLess(time.monotonic() - started, 0.3)
-        self.assertEqual(len(starts), 2)
-
     def test_osm_malformed_or_unknown_response_is_failure(self):
-        for payload in [{"error": "Unable to geocode"}, [], {}, {**OSM, "display_name": []},
+        for payload in [{"error": "Unable to geocode"}, [], {}, {**OSM, "display_name": []}, {**OSM, "display_name": "Unable to geocode"},
                         {**OSM, "address": []}, {**OSM, "address": {}},
                         {**OSM, "address": {"city": []}}, {**OSM, "osm_type": "unknown"},
                         {**OSM, "osm_id": -99}, {**OSM, "osm_id": True}]:
@@ -599,66 +222,28 @@ class AdapterTest(unittest.TestCase):
             holder.terminate()
             holder.communicate(timeout=2)
 
-    @patch("adapter.server.upstream", return_value=AMAP)
-    def test_entire_lookup_has_one_budget_and_returns_no_partial_list(self, upstream):
-        for index in range(50):
-            self.adapter.reverse(f"39.{index:06d}", LON)
-        self.expire()
-        self.adapter.lookup_timeout = 0.12
-        workers, budgets = [], []
-        release = threading.Event()
-        def slow(*args):
-            workers.append(threading.current_thread())
-            budgets.append(args[6])
-            release.wait(timeout=2)
-            return AMAP
-        upstream.side_effect = slow
-        started = time.monotonic()
-        try:
-            with patch.object(self.adapter, "address", wraps=self.adapter.address) as address:
-                self.error(504, self.adapter.lookup, ",".join(f"N-{index}" for index in range(1, 51)))
-                self.assertLess(time.monotonic() - started, 0.4)
-                self.assertEqual(address.call_count, 4)
-        finally:
-            release.set()
-            for worker in workers:
-                worker.join(timeout=1)
-                self.assertFalse(worker.is_alive())
-        self.assertEqual(len(budgets), 4)  # Queued work must not start after timeout.
-        self.assertTrue(all(0 < budget <= self.adapter.lookup_timeout for budget in budgets))
-        with self.adapter.connect() as db:
-            self.assertEqual(db.execute("SELECT count(*) FROM cache WHERE expires>0").fetchone()[0], 0)
+    def test_actual_network_child_killed_on_slow_drip(self):
+        mock = ThreadingHTTPServer(("127.0.0.1", 0), MockHTTP)
+        mock.requests = []
+        real_run = subprocess.run
+        with serving(mock) as url:
+            code = ("import json,sys; from adapter import server; "
+                    f"server.AMAP_URL={url + '/slow'!r}; "
+                    "print(json.dumps(server.fetch(*json.load(sys.stdin))))")
+            def local_child(command, **kwargs):
+                return real_run([sys.executable, "-c", code], **kwargs)
+            started = time.monotonic()
+            with patch("adapter.server.subprocess.run", side_effect=local_child):
+                # Includes interpreter/import startup on a loaded CI runner.
+                self.error(504, server.upstream, "amap", "fake-test-key", LAT, LON, "", "", 2)
+            self.assertLess(time.monotonic() - started, 3)
+            self.assertTrue(mock.requests)
 
-    @patch("adapter.server.upstream", return_value=AMAP)
-    def test_lookup_cancels_queued_requests_when_a_nonfirst_item_fails(self, upstream):
-        originals = [self.adapter.reverse(f"39.{index:06d}", LON) for index in range(50)]
-        first_wave = {item["lat"] for item in originals[:4]}
-        ready, release = threading.Barrier(4), threading.Event()
-        workers = []
-        def request(*args):
-            workers.append(threading.current_thread())
-            if args[2] in first_wave:
-                ready.wait(timeout=1)
-            if args[2] == originals[0]["lat"]:
-                release.wait(timeout=0.3)
-            elif args[2] == originals[1]["lat"]:
-                raise server.AdapterError(502, "Upstream request failed")
-            else:
-                time.sleep(0.005)
-            return AMAP
-        upstream.side_effect = request
-        upstream.reset_mock()
-        started = time.monotonic()
-        try:
-            self.error(502, self.adapter.lookup, ",".join(f"N-{index}" for index in range(1, 51)), "en", "amap")
-            self.assertLessEqual(upstream.call_count, 8)  # Allow in-flight scheduling races.
-            self.assertLess(time.monotonic() - started, 0.25)
-        finally:
-            release.set()
-            for worker in set(workers):
-                worker.join(timeout=1)
-                self.assertFalse(worker.is_alive())
-        self.assertLessEqual(upstream.call_count, 8)
+    def test_configuration_bounds(self):
+        for value in ["0", "-1", "nan", "inf", "oops", "26"]:
+            with patch.dict(os.environ, {"LOOKUP_TIMEOUT_SECONDS": value}):
+                with self.assertRaises(ValueError):
+                    server.number_env("LOOKUP_TIMEOUT_SECONDS", "20", 25)
 
     def test_real_http_upstream_conversion_osm_coordinates_redirect_and_size(self):
         mock = ThreadingHTTPServer(("127.0.0.1", 0), MockHTTP)
@@ -677,19 +262,19 @@ class AdapterTest(unittest.TestCase):
                 self.assertNotIn("yoursk", " ".join(command))
                 return real_run([sys.executable, "-c", code], **kwargs)
             with patch("adapter.server.subprocess.run", side_effect=local_child):
-                result = self.adapter.reverse(LAT, LON, "zh")
+                result = self.adapter.reverse(address(), "zh")
                 self.assertEqual((result["lat"], result["lon"]), (LAT, "116.39747"))
-                self.assertEqual(self.adapter.lookup("N-1", "zh"), [result])
+                self.assertEqual(self.adapter.lookup([address()], "zh"), [result])
             query = urllib.parse.parse_qs(urllib.parse.urlsplit(mock.requests[-1][0]).query)
             self.assertEqual(query["location"], ["116.40371358,39.91022650"])
             self.assertEqual(query["extensions"], ["all"])
             self.assertNotEqual(query["location"][0], f"{LON},{LAT}")
             baidu = server.Adapter(self.db_path, provider="baidu", baidu_ak="yourak", baidu_sk="yoursk")
             with patch("adapter.server.subprocess.run", side_effect=local_child):
-                result = baidu.reverse(LAT, LON, "zh-cn")
+                result = baidu.reverse(address(), "zh-cn")
                 self.assertEqual(result["upstream"]["provider"], "baidu")
                 self.assertEqual((result["lat"], result["lon"]), (LAT, "116.39747"))
-                self.assertEqual(baidu.lookup("N-1", "zh-cn"), [result])
+                self.assertEqual(baidu.lookup([address()], "zh-cn"), [result])
             path = urllib.parse.urlsplit(mock.requests[-1][0])
             query = urllib.parse.parse_qs(path.query)
             self.assertEqual((path.path, query["location"], query["coordtype"]), ("/baidu/", [LAT + ",116.39747"], ["wgs84ll"]))
@@ -723,112 +308,474 @@ class AdapterTest(unittest.TestCase):
             with patch.object(server, "AMAP_URL", url + "/large"):
                 self.error(502, server.fetch, "amap", "fake-test-key", LAT, LON, "", "", 1)
 
-    def test_actual_network_child_killed_on_slow_drip(self):
-        mock = ThreadingHTTPServer(("127.0.0.1", 0), MockHTTP)
-        mock.requests = []
-        real_run = subprocess.run
-        with serving(mock) as url:
-            code = ("import json,sys; from adapter import server; "
-                    f"server.AMAP_URL={url + '/slow'!r}; "
-                    "print(json.dumps(server.fetch(*json.load(sys.stdin))))")
-            def local_child(command, **kwargs):
-                return real_run([sys.executable, "-c", code], **kwargs)
-            started = time.monotonic()
-            with patch("adapter.server.subprocess.run", side_effect=local_child):
-                # Includes interpreter/import startup on a loaded CI runner.
-                self.error(504, server.upstream, "amap", "fake-test-key", LAT, LON, "", "", 2)
-            self.assertLess(time.monotonic() - started, 3)
-            self.assertTrue(mock.requests)
+    @patch("adapter.server.upstream", return_value=AMAP)
+    def test_cache_deletion_restart_language_and_precise_coordinates(self, upstream):
+        precise = "39.12345678901234567890123456789"
+        row = address(-10001, precise, LON)
+        first = self.adapter.reverse(row, "ZH-CN")
+        self.assertEqual((first["osm_id"], first["lat"], first["lon"]), (-10001, precise, "116.39747"))
+        self.assertEqual(first["georelay"], {"version": 1, "outside_mainland": False})
+        restarted = server.Adapter(self.db_path, "fake-test-key")
+        self.assertEqual(restarted.lookup([row], "zh-cn"), [first])
+        self.assertEqual(upstream.call_count, 1)
+        self.assertEqual(restarted.lookup([row], "en")[0]["osm_id"], -10001)
+        self.expire()
+        self.assertEqual(restarted.lookup([row], "zh-cn")[0]["lat"], precise)
+        self.assertEqual(upstream.call_count, 3)
+        self.db_path.unlink()
+        empty = server.Adapter(self.db_path, "fake-test-key")
+        self.assertEqual(empty.lookup([row], "zh-cn"), [first])
+        self.assertEqual(upstream.call_count, 4)
+        with empty.connect() as db:
+            self.assertEqual({r[0] for r in db.execute("SELECT name FROM sqlite_master WHERE type='table'")}, {"cache"})
+            self.assertFalse(db.execute("PRAGMA foreign_key_list(cache)").fetchall())
 
     @patch("adapter.server.upstream", return_value=AMAP)
-    def test_http_contract_and_private_logs(self, upstream):
+    def test_concurrent_candidates_share_template_without_sharing_identity(self, upstream):
+        adapters = [server.Adapter(self.db_path, "fake-test-key") for _ in range(4)]
+        rows = [address(-index - 1) for index in range(24)]
+        with concurrent.futures.ThreadPoolExecutor(max_workers=8) as pool:
+            results = list(pool.map(lambda item: adapters[item[0] % 4].reverse(item[1]), enumerate(rows)))
+        self.assertEqual([body["osm_id"] for body in results], [row["osm_id"] for row in rows])
+        calls = upstream.call_count
+        self.assertEqual(self.adapter.reverse(address(-10001))["osm_id"], -10001)
+        self.assertEqual(upstream.call_count, calls)
+        with self.adapter.connect() as db:
+            cached = db.execute("SELECT body FROM cache").fetchall()
+            self.assertEqual(len(cached), 1)
+            template = json.loads(cached[0][0])
+            self.assertFalse({"osm_id", "osm_type", "lat", "lon"} & set(template))
+
+    def test_expired_cache_cleanup_is_bounded_low_frequency_and_preserves_live_entries(self):
+        with self.adapter.connect() as db:
+            db.executemany("INSERT INTO cache VALUES(?,?,?,?,?)", [(str(i), "", "amap", 0, "{}") for i in range(1200)])
+            db.execute("INSERT INTO cache VALUES('live','','amap',?, '{}')", (time.time() + 1000,))
+        self.adapter.cleanup(time.monotonic() + 2)
+        with self.adapter.connect() as db:
+            self.assertEqual(db.execute("SELECT count(*) FROM cache WHERE expires=0").fetchone()[0], 700)
+        self.adapter.cleanup(time.monotonic() + 2)
+        with self.adapter.connect() as db:
+            self.assertEqual(db.execute("SELECT count(*) FROM cache").fetchone()[0], 701)
+        self.adapter._next_cleanup = 0
+        self.adapter.cleanup(time.monotonic() + 2)
+        with self.adapter.connect() as db:
+            self.assertEqual(db.execute("SELECT count(*) FROM cache WHERE expires=0").fetchone()[0], 200)
+            self.assertEqual(db.execute("SELECT cache_key FROM cache WHERE expires>0").fetchall(), [("live",)])
+
+    def test_legacy_identity_database_is_rejected_without_modification(self):
+        legacy = Path(self.temp.name) / "legacy.sqlite3"
+        with contextlib.closing(sqlite3.connect(legacy)) as db, db:
+            db.execute("CREATE TABLE identities (id INTEGER PRIMARY KEY AUTOINCREMENT, lat TEXT, lon TEXT)")
+            db.execute("INSERT INTO identities VALUES(10001,?,?)", (LAT, LON))
+        original = legacy.read_bytes()
+        with self.assertRaisesRegex(ValueError, "Legacy identity"):
+            server.Adapter(legacy)
+        self.assertEqual(legacy.read_bytes(), original)
+        self.assertFalse(Path(str(legacy) + ".osm.lock").exists())
+        with patch.dict(os.environ, {"ADAPTER_DB": str(legacy)}, clear=True), patch.object(sys, "argv", ["adapter.server"]):
+            with self.assertRaisesRegex(ValueError, "Legacy ADAPTER_DB"):
+                server.main()
+        with contextlib.closing(sqlite3.connect(legacy)) as db, db:
+            self.assertEqual(db.execute("SELECT id FROM identities").fetchall(), [(10001,)])
+
+    @patch("adapter.server.upstream", return_value=AMAP)
+    def test_lookup_validates_whole_batch_and_skips_positive_history(self, upstream):
+        rows = [address(-2, "39.9"), address()]
+        response = self.adapter.lookup([{"osm_id": 123, "osm_type": "way"}, *rows, {"osm_id": 12, "osm_type": "node"}], "en")
+        self.assertEqual([body["osm_id"] for body in response], [-2, -1])
+        self.assertEqual(upstream.call_count, 2)
+        upstream.reset_mock()
+        self.assertEqual(self.adapter.lookup([{"osm_id": 123, "osm_type": "way"}]), [])
+        self.assertEqual(self.adapter.lookup([]), [])
+        invalid = [None, "N-1", [address(), address()], [address()] * 51,
+                   [address(), {**address(-2), "osm_type": "way"}],
+                   [address(), {**address(-2), "lat": "nan"}],
+                   [address(), {**address(-2), "lat": "39.900"}],
+                   [{**address(), "osm_id": 0}], [{**address(), "osm_id": True}],
+                   [{**address(), "osm_id": -server.MAX_ID - 1}],
+                   [address(context={"outside_mainland": 1})],
+                   [address(context={"outside_mainland": False, "source_osm_id": 123})],
+                   [address(context={"outside_mainland": False, "source_osm_type": "way", "source_osm_id": -1})]]
+        for rows in invalid:
+            status = 422 if isinstance(rows, list) and len(rows) == 2 and rows[1].get("osm_type") == "way" else 400
+            self.error(status, self.adapter.lookup, rows)
+        upstream.assert_not_called()
+
+    def test_provider_changes_keep_application_provenance_and_isolate_caches(self):
+        self.adapter.baidu_ak, self.adapter.baidu_sk = "yourak", "yoursk"
+        mainland = copy.deepcopy(OSM)
+        mainland["address"]["country_code"] = "cn"
+        with patch.object(self.adapter, "osm", return_value=mainland):
+            osm = self.adapter.reverse(address(), provider="osm")
+        row = from_response(osm)
+        self.assertFalse(row["context"]["outside_mainland"])
+        with patch("adapter.server.upstream", return_value=AMAP) as upstream:
+            amap = self.adapter.reverse(row)
+            self.assertEqual(upstream.call_args.args[0], "amap")
+        with patch("adapter.server.upstream", return_value=BAIDU):
+            baidu = self.adapter.reverse(row, provider="baidu")
+        self.assertEqual(amap["georelay"], baidu["georelay"])
+        self.assertEqual(baidu["georelay"]["source_osm_id"], 123)
+        self.assertFalse(baidu["georelay"]["outside_mainland"])
+        # Same coordinate, different evidence cannot reuse the mainland template.
+        outside = address(context={"outside_mainland": True, "source_osm_type": "way", "source_osm_id": 123})
+        with patch.object(self.adapter, "osm", return_value=OSM) as provider, patch("adapter.server.upstream") as keyed:
+            result = self.adapter.reverse(outside)
+            self.assertTrue(result["georelay"]["outside_mainland"])
+            provider.assert_called_once()
+            keyed.assert_not_called()
+        with self.adapter.connect() as db:
+            self.assertEqual({row[0] for row in db.execute("SELECT policy FROM cache")}, {"auto:amap", "baidu", "osm"})
+
+    def test_fixed_baidu_and_global_amap_configuration_and_coverage(self):
+        fixed = server.Adapter(self.db_path, provider="baidu", baidu_ak="yourak", baidu_sk="yoursk")
+        foreign = copy.deepcopy(BAIDU)
+        foreign["result"]["addressComponent"].update(country="France", country_code_iso2="FR", province=[])
+        row = address(lat=OSM_LAT, lon=OSM_LON)
+        with patch("adapter.server.upstream", return_value=foreign):
+            self.assertEqual(fixed.reverse(row)["address"]["country_code"], "fr")
+        self.expire()
+        fixed.baidu_sk = ""
+        self.error(503, fixed.lookup, [row])
+        fixed.baidu_sk = "yoursk"
+        with patch("adapter.server.upstream", return_value={"status": 302, "message": "private text"}):
+            self.error(502, fixed.lookup, [row])
+        fixed_amap = server.Adapter(self.db_path, "fake-test-key", provider="amap")
+        foreign = copy.deepcopy(AMAP)
+        foreign["regeocode"]["addressComponent"].update(country="Japan", province=[])
+        row = address(lat="35.65858", lon="139.74543")
+        with patch("adapter.server.upstream", return_value=foreign):
+            self.error(502, fixed_amap.reverse, row)
+        global_amap = server.Adapter(self.db_path, "fake-test-key", provider="amap", amap_region="global")
+        with patch("adapter.server.upstream", return_value=foreign) as upstream:
+            self.assertEqual(global_amap.reverse(row)["address"]["country"], "Japan")
+            self.assertEqual(upstream.call_args.args[-1], "global")
+        with patch("adapter.server.upstream", return_value=AMAP) as upstream:
+            self.assertEqual(fixed_amap.reverse(row)["osm_id"], -1)
+            self.assertEqual(upstream.call_count, 1)
+
+    def test_auto_region_confirmation_and_errors_preserve_independent_evidence(self):
+        for lat, lon, country, subdivision in [("37.5665", "126.978", "kr", ""), ("1.3521", "103.8198", "sg", ""),
+                                               ("22.3193", "114.1694", "cn", "CN-HK"), ("22.1987", "113.5439", "cn", "CN-MO")]:
+            foreign = copy.deepcopy(OSM)
+            foreign["address"].update(country_code=country, **{"ISO3166-2-lvl3": subdivision})
+            with patch.object(self.adapter, "osm", return_value=foreign), patch("adapter.server.upstream", side_effect=server.AdapterError(504, "Upstream request timed out")) as keyed:
+                result = self.adapter.reverse(address(lat=lat, lon=lon))
+                self.assertTrue(result["georelay"]["outside_mainland"])
+                self.assertEqual(keyed.call_count, 1)
+                self.expire()
+                self.adapter.reverse(from_response(result))
+                self.assertEqual(keyed.call_count, 1)
+        self.adapter.key = ""
+        mainland = copy.deepcopy(OSM)
+        for code in ["cn", "", "?", "china"]:
+            mainland["address"]["country_code"] = code
+            with patch.object(self.adapter, "osm", return_value=mainland):
+                self.error(503, self.adapter.reverse, address())
+        self.adapter.key = "fake-test-key"
+        with patch.object(self.adapter, "osm", return_value=mainland), patch("adapter.server.upstream", side_effect=server.AdapterError(504, "Upstream request timed out")):
+            self.error(504, self.adapter.reverse, address())
+
+    def test_overseas_without_mainland_key_still_requires_public_osm_operator_identity(self):
+        self.adapter.key = ""
+        row = address(-10001, OSM_LAT, OSM_LON)
+        with patch.object(self.adapter, "osm", return_value=OSM) as osm, patch("adapter.server.upstream") as keyed:
+            first = self.adapter.reverse(row, "fr")
+            self.assertEqual((first["osm_id"], first["lat"], first["lon"]), (-10001, OSM_LAT, OSM_LON))
+            self.assertTrue(first["georelay"]["outside_mainland"])
+            osm.assert_called_once()
+            keyed.assert_not_called()
+        self.adapter.user_agent = ""
+        self.assertEqual(self.adapter.lookup([row], "fr"), [first])
+        self.expire()
+        self.error(503, self.adapter.lookup, [from_response(first)], "fr")
+
+    def test_fifty_osm_contexts_expand_verified_sources_and_preserve_request_order(self):
+        rows = [address(-i - 1, f"48.{i:06d}", OSM_LON,
+                        {"outside_mainland": True, "source_osm_type": "way", "source_osm_id": max(1, i)}) for i in range(50)]
+        responses = [{**OSM, "osm_id": i} for i in range(1, 50)]
+        with patch.object(self.adapter, "osm", return_value=list(reversed(responses))) as osm:
+            result = self.adapter.lookup(list(reversed(rows)), "EN")
+            self.assertEqual(osm.call_count, 1)
+            self.assertEqual(set(osm.call_args.args[-1].split(",")), {f"W{i}" for i in range(1, 50)})
+        self.assertEqual([(body["osm_id"], body["lat"], body["lon"]) for body in result],
+                         [(row["osm_id"], row["lat"], row["lon"]) for row in reversed(rows)])
+        self.assertTrue(all(body["georelay"]["outside_mainland"] for body in result))
+
+    def test_osm_batch_rejects_missing_duplicate_foreign_and_malformed_items_atomically(self):
+        rows = [address(-1, OSM_LAT, OSM_LON, {"outside_mainland": True, "source_osm_type": "way", "source_osm_id": 123}),
+                address(-2, "48.85", OSM_LON, {"outside_mainland": True, "source_osm_type": "node", "source_osm_id": 456})]
+        second = {**OSM, "osm_id": 456, "osm_type": "node"}
+        for payload in [[], [OSM, OSM], [OSM], [OSM, {**second, "osm_id": 999}],
+                        [OSM, {**second, "display_name": []}], {"error": "Unable to geocode"}]:
+            with patch.object(self.adapter, "osm", return_value=payload):
+                self.error(502, self.adapter.lookup, rows, "en")
+            with self.adapter.connect() as db:
+                self.assertEqual(db.execute("SELECT count(*) FROM cache").fetchone()[0], 0)
+
+    def test_fixed_osm_batch_mainland_is_source_without_overseas_evidence(self):
+        mainland = copy.deepcopy(OSM)
+        mainland["address"]["country_code"] = "cn"
+        rows = [address(-1, context={"outside_mainland": False, "source_osm_type": "way", "source_osm_id": 123}),
+                address(-2, "39.9", context={"outside_mainland": False, "source_osm_type": "way", "source_osm_id": 123})]
+        with patch.object(self.adapter, "osm", return_value=[mainland]) as osm:
+            result = self.adapter.lookup(rows, "fr", "osm")
+            osm.assert_called_once()
+        self.assertEqual([body["osm_id"] for body in result], [-1, -2])
+        self.assertTrue(all(not body["georelay"]["outside_mainland"] for body in result))
+        with patch("adapter.server.upstream", return_value=AMAP) as keyed:
+            self.adapter.lookup([from_response(body) for body in result])
+            self.assertEqual(keyed.call_count, 2)
+
+    def test_fifty_mainland_refreshes_have_four_workers_and_complete_ordered_results(self):
+        rows = [address(-i - 1, f"39.{i:06d}") for i in range(50)]
+        self.adapter.lookup_timeout = 5
+        self.adapter.baidu_ak, self.adapter.baidu_sk = "yourak", "yoursk"
+        for provider, payload in [("amap", AMAP), ("baidu", BAIDU)]:
+            active = peak = 0
+            lock = threading.Lock()
+            def delayed(*args):
+                nonlocal active, peak
+                with lock:
+                    active += 1
+                    peak = max(peak, active)
+                try:
+                    time.sleep(0.035)
+                    return payload
+                finally:
+                    with lock:
+                        active -= 1
+            with patch("adapter.server.upstream", side_effect=delayed) as upstream:
+                result = self.adapter.lookup(list(reversed(rows)), "en", provider)
+            self.assertEqual(upstream.call_count, 50)
+            self.assertTrue(1 < peak <= 4)
+            self.assertEqual([body["osm_id"] for body in result], [row["osm_id"] for row in reversed(rows)])
+
+    def test_lookup_deadline_cancels_queue_and_late_responses_do_not_enter_cache(self):
+        rows = [address(-i - 1, f"39.{i:06d}") for i in range(50)]
+        self.adapter.lookup_timeout = 0.12
+        workers, budgets = [], []
+        release = threading.Event()
+        def slow(*args):
+            workers.append(threading.current_thread())
+            budgets.append(args[6])
+            release.wait(timeout=2)
+            return AMAP
+        try:
+            with patch("adapter.server.upstream", side_effect=slow), patch.object(self.adapter, "address", wraps=self.adapter.address) as calls:
+                started = time.monotonic()
+                self.error(504, self.adapter.lookup, rows)
+                self.assertLess(time.monotonic() - started, 0.4)
+                self.assertEqual(calls.call_count, 4)
+        finally:
+            release.set()
+            for worker in workers:
+                worker.join(timeout=1)
+                self.assertFalse(worker.is_alive())
+        self.assertTrue(all(0 < budget <= self.adapter.lookup_timeout for budget in budgets))
+        with self.adapter.connect() as db:
+            self.assertEqual(db.execute("SELECT count(*) FROM cache").fetchone()[0], 0)
+
+    def test_nonfirst_failure_is_observed_before_slow_first_item(self):
+        rows = [address(-i - 1, f"39.{i:06d}") for i in range(50)]
+        ready, release = threading.Barrier(4), threading.Event()
+        workers = []
+        def request(*args):
+            workers.append(threading.current_thread())
+            if args[2] in {row["lat"] for row in rows[:4]}:
+                ready.wait(timeout=1)
+            if args[2] == rows[0]["lat"]:
+                release.wait(timeout=0.3)
+            elif args[2] == rows[1]["lat"]:
+                raise server.AdapterError(502, "Upstream request failed")
+            else:
+                time.sleep(0.005)
+            return AMAP
+        # lookup cancels queued futures but returns before running workers finish.
+        # Keep their provider mocked until every worker has completed teardown.
+        with patch("adapter.server.upstream", side_effect=request) as upstream:
+            try:
+                started = time.monotonic()
+                self.error(502, self.adapter.lookup, rows, "en", "amap")
+                self.assertLess(time.monotonic() - started, 0.25)
+                self.assertLessEqual(upstream.call_count, 8)
+            finally:
+                release.set()
+                for worker in set(workers):
+                    worker.join(timeout=1)
+                    self.assertFalse(worker.is_alive())
+
+    @patch("adapter.server.upstream", return_value=OSM)
+    def test_osm_rate_limit_survives_restart_and_wait_counts_toward_budget(self, upstream):
+        starts = []
+        def request(*args):
+            starts.append(time.monotonic())
+            return OSM
+        upstream.side_effect = request
+        row = address(lat=OSM_LAT, lon=OSM_LON)
+        self.adapter.reverse(row)
+        restarted = server.Adapter(self.db_path, user_agent=USER_AGENT)
+        restarted.reverse(row, "fr")
+        self.assertGreaterEqual(starts[1] - starts[0], 0.99)
+        restarted.lookup_timeout = 0.1
+        started = time.monotonic()
+        self.error(504, restarted.lookup, [row], "de")
+        self.assertLess(time.monotonic() - started, 0.3)
+        self.assertEqual(len(starts), 2)
+
+    @patch("adapter.server.upstream", return_value=AMAP)
+    def test_missing_keys_and_upstream_failures_never_become_unknown(self, upstream):
+        row = address()
+        first = self.adapter.reverse(row)
+        self.adapter.key = ""
+        self.assertEqual(self.adapter.lookup([row]), [first])
+        self.expire()
+        mainland = {**OSM, "address": {"country_code": "cn"}}
+        with patch.object(self.adapter, "osm", return_value=mainland):
+            self.error(503, self.adapter.lookup, [row])
+        self.adapter.key = "fake-test-key"
+        upstream.side_effect = server.AdapterError(504, "Upstream request timed out")
+        with patch.object(self.adapter, "osm", return_value=mainland):
+            self.error(504, self.adapter.lookup, [row])
+        upstream.side_effect = None
+        for payload in [{"status": "0", "info": "private text"}, {"error": "Unable to geocode"}, {"status": "1", "regeocode": []}, []]:
+            upstream.return_value = payload
+            with patch.object(self.adapter, "osm", return_value=mainland):
+                self.error(502, self.adapter.lookup, [row])
+
+    def http(self, url, document=None, endpoint="/v1/reverse", status=200, raw=None, headers=None, method=None):
+        data = json.dumps(document).encode() if document is not None else raw
+        request = urllib.request.Request(url + endpoint, data=data, method=method,
+                                         headers=headers or ({"Content-Type": "application/json"} if data is not None else {}))
+        try:
+            response = urllib.request.urlopen(request, timeout=3)
+        except urllib.error.HTTPError as exc:
+            response = exc
+        with response:
+            self.assertEqual(response.status, status)
+            self.assertEqual(response.headers.get_content_type(), "application/json")
+            body = json.load(response)
+            if status != 200:
+                self.assertNotIn(LAT, json.dumps(body))
+                self.assertNotIn("Unable to geocode", json.dumps(body))
+            return body
+
+    @patch("adapter.server.upstream", return_value=AMAP)
+    def test_http_versioned_protocol_body_validation_and_private_errors(self, upstream):
+        document = {"version": 1, "address": address(), "language": "ZH-CN"}
         output = io.StringIO()
         with contextlib.redirect_stderr(output), serving(server.Server(("127.0.0.1", 0), self.adapter)) as url:
-            def get(path, status=200, **headers):
-                request = urllib.request.Request(url + path, headers=headers)
-                try:
-                    response = urllib.request.urlopen(request, timeout=3)
-                except urllib.error.HTTPError as exc:
-                    response = exc
-                with response:
-                    self.assertEqual(response.status, status)
-                    self.assertEqual(response.headers.get_content_type(), "application/json")
-                    return json.load(response)
-            self.assertEqual(get("/health"), {"status": "ok"})
-            self.assertEqual(upstream.call_count, 0)
-            result = get(f"/reverse?lat={LAT}&lon={LON}&format=jsonv2", **{"Accept-Language": "ZH-CN"})
-            self.assertEqual(get("/lookup?osm_ids=N-1", **{"Accept-Language": "zh-cn"}), [result])
-            self.assertEqual(get("/lookup?osm_ids=N123,W456,R789"), [])
-            self.assertEqual(get("/lookup?osm_ids=W456,N-1,R789", **{"Accept-Language": "zh-cn"}), [result])
+            self.assertEqual(self.http(url, endpoint="/health")["storage"], "disposable-cache")
+            first = self.http(url, document)
+            self.assertEqual(self.http(url, {"version": 1, "addresses": [address()], "language": "zh-cn"}, "/v1/lookup"), [first])
             self.assertEqual(upstream.call_count, 1)
-            for path, status in [("/reverse?lat=nan&lon=2", 400), ("/reverse?lat=1&lat=2&lon=3", 400),
-                                 ("/lookup", 400), ("/lookup?osm_ids=W-1", 422),
-                                 ("/lookup?osm_ids=N-999", 404), ("/missing", 404),
-                                 (f"/reverse?lat={LAT}&lon={LON}&provider=auto", 400),
-                                 (f"/reverse?lat={LAT}&lon={LON}&provider=", 400),
-                                 (f"/reverse?lat={LAT}&lon={LON}&provider=amap&provider=osm", 400),
-                                 ("/lookup?osm_ids=N-1&provider=unknown", 400),
-                                 ("/reverse?" + "x" * 4100, 414), ("/health?format=xml", 400)]:
-                self.assertIn("error", get(path, status))
+            for invalid in [{**document, "version": True}, {**document, "version": 2}, {**document, "language": LAT + "\n"},
+                            {**document, "provider": "auto"}, {**document, "provider": None}, {**document, "unexpected": LAT},
+                            {**document, "address": {**address(), "context": {"outside_mainland": False, "source_osm_id": 123}}}]:
+                self.http(url, invalid, status=400)
+            for raw in [b'{"version":1,"version":1}', b'{"version":NaN}', b'\xff',
+                        json.dumps(document).replace('"outside_mainland": false', '"outside_mainland": false, "outside_mainland": false').encode()]:
+                self.http(url, raw=raw, status=400)
+            self.http(url, raw=b'x' * (server.MAX_REQUEST_BODY + 1), status=413)
+            self.http(url, raw=b'{}', headers={"Content-Type": "text/plain"}, status=415)
+            self.http(url, raw=b'{}', headers={"Content-Type": "application/json", "Transfer-Encoding": "chunked"}, status=400)
+            self.http(url, endpoint="/reverse", status=409)
+            self.http(url, endpoint="/reverse?lat=" + LAT + "&lon=" + LON, status=409)
+            self.http(url, endpoint="/v1/lookup", status=409)
+            self.http(url, document, "/missing", status=404)
+            self.http(url, document, "/" + LAT, status=404)
+            self.http(url, endpoint="/health?private=" + LAT, status=400)
             self.expire()
             upstream.side_effect = server.AdapterError(504, "Upstream request timed out")
-            body = get("/lookup?osm_ids=N-1", 504)
-            self.assertNotIn("Unable to geocode", json.dumps(body))
-            request = urllib.request.Request(url + "/" + LAT, method="POST")
-            with self.assertRaises(urllib.error.HTTPError) as raised:
-                urllib.request.urlopen(request, timeout=3)
-            self.assertNotIn(LAT, raised.exception.read().decode())
+            mainland = {**OSM, "address": {"country_code": "cn"}}
+            with patch.object(self.adapter, "osm", return_value=mainland):
+                self.http(url, document, status=504)
         self.assertNotIn(LAT, output.getvalue())
         self.assertNotIn("fake-test-key", output.getvalue())
+        self.assertNotIn(AMAP["regeocode"]["formatted_address"], output.getvalue())
 
-    def test_http_provider_override_applies_to_reverse_and_lookup(self):
+    def test_http_provider_override_and_health_storage_failures(self):
         self.adapter.baidu_ak, self.adapter.baidu_sk = "yourak", "yoursk"
         with serving(server.Server(("127.0.0.1", 0), self.adapter)) as url:
-            with patch("adapter.server.upstream", return_value=BAIDU) as upstream:
-                with urllib.request.urlopen(url + f"/reverse?lat={LAT}&lon={LON}&provider=baidu") as response:
-                    first = json.load(response)
-                with urllib.request.urlopen(url + "/lookup?osm_ids=N-1&provider=baidu") as response:
-                    self.assertEqual(json.load(response), [first])
-                self.assertEqual(upstream.call_count, 1)
+            with patch("adapter.server.upstream", return_value=BAIDU):
+                first = self.http(url, {"version": 1, "address": address(), "language": "", "provider": "baidu"})
                 self.assertEqual(first["upstream"]["provider"], "baidu")
-            with patch("adapter.server.upstream", return_value=AMAP) as upstream:
-                with urllib.request.urlopen(url + "/lookup?osm_ids=N-1&provider=amap") as response:
-                    self.assertEqual(json.load(response)[0]["upstream"]["provider"], "amap")
-                self.assertEqual(upstream.call_count, 1)
+            with patch("adapter.server.upstream", return_value=AMAP):
+                result = self.http(url, {"version": 1, "addresses": [address()], "language": "", "provider": "amap"}, "/v1/lookup")
+                self.assertEqual(result[0]["upstream"]["provider"], "amap")
+            with patch.object(self.adapter, "health", side_effect=sqlite3.DatabaseError(LAT)):
+                self.assertEqual(self.http(url, endpoint="/health", status=503), {"error": "Local storage unavailable"})
 
     @patch("adapter.server.upstream", return_value=AMAP)
-    def test_sqlite_online_backup_preserves_identity_and_refuses_overwrite(self, upstream):
-        self.adapter.reverse(LAT, LON)
+    def test_online_cache_backup_refuses_legacy_source_and_overwrite(self, upstream):
+        self.adapter.reverse(address())
         backup = Path(self.temp.name) / "backup.sqlite3"
-        env = {**os.environ, "ADAPTER_DB": str(self.db_path)}
+        env = {key: value for key, value in os.environ.items() if key != "ADAPTER_DB"}
+        env["ADAPTER_CACHE_DB"] = str(self.db_path)
         command = [sys.executable, "-m", "adapter.server", "--backup", str(backup)]
         result = subprocess.run(command, env=env, capture_output=True, text=True)
         self.assertEqual(result.returncode, 0, result.stderr)
         restored = server.Adapter(backup)
-        self.assertEqual(restored.lookup("N-1")[0]["osm_id"], -1)
-        self.assertEqual(subprocess.run(command, env=env, capture_output=True).returncode, 1)
+        self.assertEqual(restored.lookup([address(-123)])[0]["osm_id"], -123)
         self.assertEqual(backup.stat().st_mode & 0o777, 0o600)
-        missing_env = {**env, "ADAPTER_DB": str(self.db_path) + ".missing"}
-        missing_backup = Path(self.temp.name) / "missing.sqlite3"
-        result = subprocess.run(command[:-1] + [str(missing_backup)], env=missing_env, capture_output=True)
-        self.assertEqual(result.returncode, 1)
-        self.assertFalse(missing_backup.exists())
+        self.assertEqual(subprocess.run(command, env=env, capture_output=True).returncode, 1)
+        missing = Path(self.temp.name) / "missing.sqlite3"
+        env["ADAPTER_CACHE_DB"] = str(self.db_path) + ".missing"
+        self.assertEqual(subprocess.run(command[:-1] + [str(missing)], env=env, capture_output=True).returncode, 1)
+        self.assertFalse(missing.exists())
+        legacy = Path(self.temp.name) / "legacy.sqlite3"
+        with contextlib.closing(sqlite3.connect(legacy)) as db, db:
+            db.execute("CREATE TABLE identities (id INTEGER)")
+        env["ADAPTER_CACHE_DB"] = str(legacy)
+        self.assertEqual(subprocess.run(command[:-1] + [str(missing)], env=env, capture_output=True).returncode, 1)
+        self.assertFalse(missing.exists())
 
-    def test_configuration_bounds(self):
-        for value in ["0", "-1", "nan", "inf", "oops", "26"]:
-            with patch.dict(os.environ, {"LOOKUP_TIMEOUT_SECONDS": value}):
-                with self.assertRaises(ValueError):
-                    server.number_env("LOOKUP_TIMEOUT_SECONDS", "20", 25)
+    @patch("adapter.server.upstream", return_value=AMAP)
+    def test_corrupt_cache_is_failure_and_never_supplies_a_candidate_identity(self, upstream):
+        row = address()
+        original = self.adapter.reverse(row)
+        cases = ["{", json.dumps({}), json.dumps({**original, "osm_id": -999}),
+                 json.dumps({"display_name": "Unable to geocode", "georelay": {"version": 1, "outside_mainland": False}}),
+                 json.dumps({"display_name": "Private text", "georelay": {"version": 1, "outside_mainland": False, "source_osm_id": -1}})]
+        for corrupt in cases:
+            with self.adapter.connect() as db:
+                db.execute("UPDATE cache SET body=?", (corrupt,))
+            self.error(503, self.adapter.reverse, address(-2))
+        self.assertEqual(upstream.call_count, 1)
+
+    def test_protocol_rejects_unhashable_fields_without_side_effects(self):
+        for field, value in [("osm_type", []), ("osm_type", {}), ("osm_id", "-1")]:
+            self.error(400, self.adapter.reverse, {**address(), field: value})
+        self.error(400, self.adapter.reverse, address(context={"outside_mainland": False, "source_osm_type": [], "source_osm_id": 123}))
+        self.error(400, self.adapter.reverse, address(), "", [])
+        with self.adapter.connect() as db:
+            self.assertEqual(db.execute("SELECT count(*) FROM cache").fetchone()[0], 0)
+
+    def test_http_duplicate_framing_headers_are_rejected_without_logging_body(self):
+        output = io.StringIO()
+        document = json.dumps({"version": 1, "address": address(), "language": ""}).encode()
+        with contextlib.redirect_stderr(output), serving(server.Server(("127.0.0.1", 0), self.adapter)) as url:
+            port = urllib.parse.urlsplit(url).port
+            for headers, status in [(f"Content-Length: {len(document)}\r\nContent-Length: {len(document)}\r\n", 400),
+                                    (f"Content-Length: {len(document)}\r\nContent-Type: application/json\r\n", 415),
+                                    ("Content-Length: 0\r\n", 400)]:
+                request = ("POST /v1/reverse HTTP/1.0\r\nHost: localhost\r\nContent-Type: application/json\r\n" + headers + "\r\n").encode() + document
+                with socket.create_connection(("127.0.0.1", port), timeout=2) as connection:
+                    connection.sendall(request)
+                    response = bytearray()
+                    while part := connection.recv(65536):
+                        response.extend(part)
+                self.assertIn(f" {status} ".encode(), bytes(response).split(b"\r\n", 1)[0])
+                self.assertNotIn(LAT.encode(), response)
+        self.assertEqual(output.getvalue(), "")
 
     def test_provider_and_secret_configuration_validation(self):
         for config in [{"provider": "unknown"}, {"provider": ""}, {"mainland_provider": "osm"}, {"amap_region": "https://elsewhere.invalid"}]:
             with self.assertRaises(ValueError):
                 server.Adapter(self.db_path, **config)
         for provider in ["auto", "", "AMAP", " baidu", "unknown"]:
-            self.error(400, self.adapter.reverse, LAT, LON, "", provider)
-            self.error(400, self.adapter.lookup, "", "", provider)
-        with self.adapter.connect() as db:
-            self.assertEqual(db.execute("SELECT count(*) FROM identities").fetchone()[0], 0)
+            self.error(400, self.adapter.reverse, address(), "", provider)
+            self.error(400, self.adapter.lookup, [], "", provider)
         secret_file = Path(self.temp.name) / "test-secret"
         secret_file.write_text("example-test-value\n")
         secret_file.chmod(0o600)
@@ -837,20 +784,17 @@ class AdapterTest(unittest.TestCase):
                 self.assertEqual(server.secret_env(name), "")
             with patch.dict(os.environ, {name + "_FILE": str(secret_file)}, clear=True):
                 self.assertEqual(server.secret_env(name), "example-test-value")
-            for values in [{name: "example-test-value", name + "_FILE": str(secret_file)},
-                           {name: "contains whitespace"}, {name: "x" * 513}]:
+            for values in [{name: "example-test-value", name + "_FILE": str(secret_file)}, {name: "contains whitespace"}, {name: "x" * 513}]:
                 with patch.dict(os.environ, values, clear=True):
                     with self.assertRaises(ValueError):
                         server.secret_env(name)
-        with patch.dict(os.environ, {"ADAPTER_DB": str(self.db_path), "GEOCODER_PROVIDER": "baidu",
-                                    "MAINLAND_PROVIDER": "baidu", "BAIDU_AK_FILE": str(secret_file),
-                                    "BAIDU_SK_FILE": str(secret_file), "AMAP_API_REGION": "global"}, clear=True), \
+        with patch.dict(os.environ, {"ADAPTER_CACHE_DB": str(self.db_path), "GEOCODER_PROVIDER": "baidu", "MAINLAND_PROVIDER": "baidu",
+                                    "BAIDU_AK_FILE": str(secret_file), "BAIDU_SK_FILE": str(secret_file), "AMAP_API_REGION": "global"}, clear=True), \
                 patch.object(sys, "argv", ["adapter.server"]), patch("adapter.server.Server") as http:
             server.main()
             configured = http.call_args.args[1]
             self.assertEqual((configured.provider, configured.mainland_provider, configured.amap_region), ("baidu", "baidu", "global"))
             self.assertEqual((configured.baidu_ak, configured.baidu_sk), ("example-test-value", "example-test-value"))
-            self.assertEqual(configured.key, "")
 
 
 if __name__ == "__main__":

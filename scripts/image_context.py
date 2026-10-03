@@ -90,6 +90,34 @@ def image_context(event_name, event, sha, ref, repository, pin):
     }
 
 
+def publication_receipt(context, pin, digests, floating, run_id, attempt):
+    """Small data-only receipt. Registry and Actions must independently prove it."""
+    source = commit(context["source_sha"])
+    channel = context["channel"]
+    version = pin["tag"] + "-georelay-" + ("beta-" if channel == "beta" else "") + source
+    if channel not in {"stable", "beta"} or context["version"] != version:
+        raise ValueError("Invalid receipt version")
+    stable_version(pin["tag"])
+    commit(pin["commit"])
+    if (set(digests) != {"georelay", "georelay-adapter"}
+            or any(not re.fullmatch(r"sha256:[0-9a-f]{64}", value) for value in digests.values())
+            or type(run_id) is not int or run_id < 1 or type(attempt) is not int or attempt < 1):
+        raise ValueError("Invalid receipt identity")
+    if (set(floating) != {"tag", "status", "reason"}
+            or floating["status"] not in {"promoted", "skipped", "failed"}
+            or floating["reason"] not in {"verified", "no_pr", "stale_source", "stale_pr", "promotion_incomplete"}
+            or not re.fullmatch(r"(?:latest|beta-pr-[1-9][0-9]*)?", floating["tag"])
+            or (channel == "beta" and floating["tag"] == "latest")
+            or (channel == "stable" and floating["tag"] != "latest")
+            or (floating["status"] == "promoted" and (floating["reason"] != "verified" or not floating["tag"]))
+            or (floating["status"] == "failed" and floating["reason"] != "promotion_incomplete")
+            or (floating["status"] == "skipped" and floating["reason"] not in {"no_pr", "stale_source", "stale_pr"})):
+        raise ValueError("Invalid receipt outcome")
+    return {"schema": 1, "run_id": run_id, "attempt": attempt, "source_sha": source,
+            "channel": channel, "version": version, "upstream": {"tag": pin["tag"], "commit": pin["commit"]},
+            "digests": digests, "fixed_verified": True, "floating": floating}
+
+
 def main():
     parser = argparse.ArgumentParser(description=__doc__)
     parser.add_argument("--json", action="store_true")

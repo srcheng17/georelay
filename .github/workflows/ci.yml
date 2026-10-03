@@ -117,7 +117,7 @@ jobs:
           docker run -d --name "$container" --network none --mount "type=volume,source=$volume,target=/data" georelay-adapter:checked
           healthy=false
           for attempt in $(seq 1 20); do
-            if docker exec "$container" python -c 'import json, urllib.request; assert json.load(urllib.request.urlopen("http://127.0.0.1:8080/health", timeout=2)) == {"status": "ok"}' >/dev/null 2>&1; then
+            if docker exec "$container" python -c 'import json, urllib.request; assert json.load(urllib.request.urlopen("http://127.0.0.1:8080/health", timeout=2)) == {"status": "ok", "protocol": 1, "storage": "disposable-cache"}' >/dev/null 2>&1; then
               healthy=true
               break
             fi
@@ -126,6 +126,11 @@ jobs:
           test "$healthy" = true
       - name: Main application startup, migrations and address runtime contract
         timeout-minutes: 5
+        run: exec bash scripts/test_main_image.sh georelay:checked georelay-adapter:checked
+      - name: Legacy identity import in compiled release
+        timeout-minutes: 5
+        env:
+          MAIN_IMAGE_IDENTITY_SCENARIO: legacy
         run: exec bash scripts/test_main_image.sh georelay:checked georelay-adapter:checked
       - name: Preserve checked images for publication
         if: needs.checks.outputs.publish_required == 'true'
@@ -185,11 +190,56 @@ jobs:
       - name: Publish only the checked multi-architecture version
         env:
           GHCR_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+          PUBLICATION_RECEIPT: ${{ runner.temp }}/publication-receipt.json
         run: bash scripts/publish_images.sh "$RUNNER_TEMP/checked-images"
+      - name: Preserve publication receipt even when alias promotion fails
+        if: always()
+        uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02 # v4
+        with:
+          name: publication-receipt-${{ github.run_id }}-${{ github.run_attempt }}-${{ needs.checks.outputs.source_sha }}-${{ needs.checks.outputs.version }}
+          path: ${{ runner.temp }}/publication-receipt.json
+          if-no-files-found: warn
+          retention-days: 90
+
+  # Fresh runner; candidate files/artifacts are only bounded API text/data.
+  release-record:
+    needs: [checks, build, verify, publish]
+    if: always() && needs.checks.outputs.image_required == 'true' && needs.checks.outputs.publish_required == 'true' && (needs.publish.result == 'success' || needs.publish.result == 'failure')
+    concurrency:
+      group: ghcr-publication-${{ github.repository }}
+      cancel-in-progress: false
+    runs-on: ubuntu-latest
+    timeout-minutes: 15
+    permissions:
+      contents: write
+      actions: read
+      checks: read
+      packages: read
+      pull-requests: read
+    steps:
+      - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4
+        with:
+          ref: main
+          persist-credentials: false
+      - name: Require enabled trusted main recorder
+        run: |
+          if [[ ! -f scripts/record_release.py ]]; then
+            echo 'bootstrap_not_enabled: trusted main recorder requires reviewed enablement' >&2
+            exit 1
+          fi
+      - name: Independently verify and record fixed image pair
+        env:
+          GH_TOKEN: ${{ github.token }}
+          GITHUB_TOKEN: ${{ github.token }}
+          ORIGINAL_RUN_ID: ${{ github.run_id }}
+          ORIGINAL_ATTEMPT: ${{ github.run_attempt }}
+          ORIGINAL_SOURCE: ${{ needs.checks.outputs.source_sha }}
+          ORIGINAL_VERSION: ${{ needs.checks.outputs.version }}
+        run: python3 scripts/record_release.py --apply --output "$RUNNER_TEMP/release-record.json"
 
   # Own main failures here: bot-dispatched runs may have no workflow_run observer.
   main-failure-notification:
-    needs: [checks, build, verify, publish]
+    needs: [checks, build, verify, publish, release-record]
     if: always()
     runs-on: ubuntu-latest
     timeout-minutes: 5
@@ -200,7 +250,7 @@ jobs:
       # Always succeed for beta/no-op runs so the beta controller can verify all jobs.
       - name: Decide whether main publication failed
         id: decision
-        run: echo "notify=${{ github.ref == 'refs/heads/main' && (github.event_name == 'push' || (github.event_name == 'workflow_dispatch' && inputs.publish)) && needs.checks.outputs.image_required != 'false' && (needs.verify.result != 'success' || needs.publish.result != 'success') }}" >> "$GITHUB_OUTPUT"
+        run: echo "notify=${{ github.ref == 'refs/heads/main' && (github.event_name == 'push' || (github.event_name == 'workflow_dispatch' && inputs.publish)) && needs.checks.outputs.image_required != 'false' && (needs.verify.result != 'success' || needs.publish.result != 'success' || needs.release-record.result != 'success') }}" >> "$GITHUB_OUTPUT"
       - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4
         if: steps.decision.outputs.notify == 'true'
         with:

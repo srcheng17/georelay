@@ -1,25 +1,29 @@
 # GeoRelay 地址适配指南
 
-本指南介绍高德、百度和 OSM 地址服务的配置与维护。项目介绍和官方功能见[中文首页](../README.zh-CN.md)，修改范围见 [MODIFICATIONS.md](../MODIFICATIONS.md)，构建使用的官方版本见 [upstream.json](../upstream.json)。
+本指南介绍高德、百度和 OSM 地址服务的配置与维护。项目介绍见[中文首页](../README.zh-CN.md)，修改范围见 [MODIFICATIONS.md](../MODIFICATIONS.md)，构建使用的官方版本见 [upstream.json](../upstream.json)。
 
 ## 架构与范围
 
 ```text
-固定官方源码 + 地址 URL 与刷新补丁
-  → 私有 Docker 网络中的 adapter
-    → 高德 regeo / 百度逆地理编码 / 官方 Nominatim
-    → 独立 SQLite 永久身份与响应缓存
+TeslaMate / PostgreSQL
+  → 永久地址编号、精确 WGS84 原坐标、可信来源与历史关联
+  → POST /v1/reverse 或 /v1/lookup，携带编号、坐标和来源
+    → 私有 Docker 网络中的 adapter
+      → 高德 regeo / 百度逆地理编码 / 官方 Nominatim
+      → 可丢弃 SQLite 文字缓存与限流状态
 ```
 
-补丁同时修改 Geocoder 的 BaseUrl 和专用 Finch pool，保留 pool size=3 与 proxy 配置。未配置自定义 URL 时，TeslaMate 仍使用官方 OSM。Sidecar 无需 Tesla token、ENCRYPTION_KEY 或生产 PostgreSQL 权限。
+应用先按精确坐标查找已有本地地址，只有新坐标才申请降序负编号并解析。供应商成功后写入地址；并发首次请求通过 PostgreSQL 唯一约束收敛到胜出行。编号空洞允许，失败不会写入 Unknown。
 
-适配器改变地址文字来源，原 PostgreSQL 继续由 TeslaMate 管理。数据库、轨迹、SQLite 和适配器响应均保留原始 **WGS84**；高德大陆查询临时转换为 **GCJ-02**；百度使用 `coordtype=wgs84ll` 直接接收原坐标。
+补丁同时修改 Geocoder 的 BaseUrl 和专用 Finch pool，保留 size=3 与 proxy。`GEORELAY_ADDRESS_MODE` 默认 `nominatim` 保留原 GET 官方路径；`application` 才启用本项目协议。Sidecar 无需 Tesla token、ENCRYPTION_KEY 或 PostgreSQL 权限。
 
-TeslaMate 在行程结束解析起终点、充电开始解析地址，启动及定时任务补修缺失地址，语言切换通过 lookup 刷新地址；普通 GPS 点不会逐点逆向解析。
+地址、轨迹、缓存键和响应均保留原始 **WGS84**；高德大陆请求临时转换为 **GCJ-02**，百度直接接收 WGS84。地址文字解析仍由高德/百度/OSM提供；数据库管理编号和历史关联，不能从坐标自行得到地点名称。
+
+TeslaMate 在行程结束、充电开始及缺失地址修复时解析，语言切换显式刷新地址；普通 GPS 点不会逐点逆向解析。
 
 ## 路由与名称
 
-`GEOCODER_PROVIDER` 设置默认策略；`/reverse`、`/lookup` 的 `provider=amap|baidu|osm` 可覆盖单次请求。TeslaMate 使用默认配置，地址供应商选择不改变 Web 底图。
+`GEOCODER_PROVIDER` 设置默认策略；版本化 POST 请求的 provider 字段可覆盖单次请求。TeslaMate 使用默认配置，地址供应商选择不改变 Web 底图。
 
 | 配置 | 地址服务 |
 | --- | --- |
@@ -52,30 +56,49 @@ TeslaMate 在行程结束解析起终点、充电开始解析地址，启动及�
 
 ## 接口
 
-服务监听容器端口 `8080`，返回 JSON；仅面向受信任的私有网络。
+服务监听容器端口 `8080`，仅面向受信任私网。应用与适配器必须使用同一配套版本；旧 GET 地址协议明确拒绝，不能混用镜像。
 
 | 接口 | 参数与行为 |
 | --- | --- |
-| `GET /reverse` | `lat`、`lon` 为原始 WGS84；返回 Nominatim 兼容地址 |
-| `GET /lookup` | `osm_ids=N-1,N-2`，最多 50 个身份；返回请求的本地负数 node 身份，跳过来源未确认的正数身份 |
-| `GET /health` | 检查本地 SQLite 就绪，成功为 `{"status":"ok"}` |
+| `POST /v1/reverse` | `version=1`、`address`、`language`，以及可选 `provider`；返回 Nominatim 形状的地址 |
+| `POST /v1/lookup` | `version=1`、`addresses`（最多50项）、`language`、可选 `provider`；按请求顺序返回负 node 地址 |
+| `GET /health` | 仅检查本地缓存就绪，成功为 `{"status":"ok","protocol":1,"storage":"disposable-cache"}` |
 
-reverse / lookup 支持 `format=jsonv2`（也接受 `json`）和 `provider=amap|baidu|osm`。`Accept-Language` 区分缓存并传给 OSM；当前高德、百度查询不传语言参数，使用服务默认语言，因此英文请求也可能得到中文地址。
+```json
+{
+  "version": 1,
+  "address": {
+    "osm_id": -10001,
+    "osm_type": "node",
+    "lat": "48.858400123",
+    "lon": "2.294500456",
+    "context": {
+      "source_osm_type": "node",
+      "source_osm_id": 123,
+      "outside_mainland": true
+    }
+  },
+  "language": "en"
+}
+```
+
+示例为公开虚构测试上下文；`context` 的真实值只能来自应用已有可信来源。没有来源时传 {"outside_mainland": false}；不得从任意正编号推断 OSM 对象或把显式大陆 OSM 查询当作境外证据。响应附 `georelay` 版本/来源/境外证据，应用永久保留该上下文，供应商切换不会抹掉已有可信来源。
+
+`language` 区分缓存并传给 OSM，高德/百度使用默认语言。缓存键包含规范化精确坐标、语言、策略和影响结果的来源上下文；缓存模板不保留客户端编号，返回时使用本次请求身份。删除缓存后可凭请求重建结果。
 
 | 条件 | 状态码 |
 | --- | --- |
-| 参数非法、坐标越界、重复参数、超过 50 个身份 | `400` |
-| 本地身份或端点不存在 | `404` |
-| 非 node 的负数身份 | `422` |
+| 非法 JSON/字段、坐标越界、重复负身份或超过50项 | `400` |
+| 端点不存在 | `404` |
+| 非 node 的负身份 | `422` |
+| 旧 GET 地址协议 | `409` |
 | 上游失败、非法响应或身份不匹配 | `502` |
-| 缺少所需配置或本地存储不可用 | `503` |
-| 网络、限流锁或整批请求超时 | `504` |
+| 缺配置或缓存存储不可用 | `503` |
+| 网络、限流锁或整批预算耗尽 | `504` |
 
-有效缓存可直接返回；过期缓存刷新失败时明确报错，不合成永久 `Unknown`。`/health` 成功不代表 Key、配额或外网可用。
+正数历史身份只跳过，不请求 OSM；全正批次返回 `[]`。应用刷新只传唯一的负 node 地址，保留历史正地址。lookup 失败不返回部分成功列表，不合成 Unknown；缓存可保留已成功解析的项目。应用核验返回身份集合、坐标与来源，不接受缺项、重复、额外项或移动后的坐标。
 
-合法的正数 `N/W/R` 身份会被跳过，全正数批次返回 `[]`，不请求 OSM。混合批次中的本地负数身份仍正常刷新；不存在的本地负身份仍返回 `404`。这允许已有地址与新地址共存，但不导入或更新旧地址身份。
-
-大陆冷查询使用最多4个并行任务，整批仍共享同一截止时间；超时返回 `504`，供应商配额或权限错误返回 `502`。可信 OSM 来源继续批量查询，并保留串行限流。
+lookup 使用最多4线程、同一截止时间；可信 OSM 来源仍批量匹配，公共请求维持文件锁限流。`health` 成功不能证明 Key、配额或外网可用。
 
 ## 配置
 
@@ -85,12 +108,12 @@ reverse / lookup 支持 `format=jsonv2`（也接受 `json`）和 `provider=amap|
 
 ```dotenv
 NOMINATIM_BASE_URL=http://georelay-adapter:8080
-NOMINATIM_LOCAL_IDENTITIES_ONLY=true
+GEORELAY_ADDRESS_MODE=application
 ```
 
 仅接受 HTTP/HTTPS origin，可含端口；不能包含账号、路径、query 或 fragment，末尾 `/` 会规范化。默认值为 `https://nominatim.openstreetmap.org`。`NOMINATIM_PROXY` 是 CONNECT proxy，不能替代自定义 geocoder URL。
 
-`NOMINATIM_LOCAL_IDENTITIES_ONLY=true` 让修改版在语言刷新时跳过没有 lookup 结果的正数历史身份，避免上游逐条 reverse 回退。仅连接本适配器时启用；缺省 `false` 保留官方或自托管 OSM 的原行为，其他值拒绝。
+`GEORELAY_ADDRESS_MODE=application` 启用 PostgreSQL 地址所有权与新 POST 协议；只有完成显式 fresh 初始化或 legacy 导入后才能分配/刷新地址。默认 `nominatim` 继续使用官方或自托管 OSM。原 `NOMINATIM_LOCAL_IDENTITIES_ONLY` 仅用于旧 Nominatim 刷新策略，不代替新模式初始化。
 
 ### Sidecar
 
@@ -104,10 +127,12 @@ NOMINATIM_LOCAL_IDENTITIES_ONLY=true
 | `AMAP_KEY` | 高德 Web 服务 Key，仅提供给 sidecar |
 | `AMAP_KEY_FILE` | 可替代 `AMAP_KEY`；两者不能同时设置，文件须让容器 UID 10001 可读 |
 | `NOMINATIM_USER_AGENT` | OSM 请求必填，包含应用名和实际联系方式；未配置时 OSM 请求返回 `503` |
-| `ADAPTER_DB` | `/data/adapter.sqlite3`，必须永久保存 |
+| `ADAPTER_CACHE_DB` | `/data/cache.sqlite3`，只保存可丢弃缓存 |
 | `CACHE_TTL_SECONDS` | 默认 `86400`，最大 `31536000`；只影响响应缓存 |
 | `UPSTREAM_TIMEOUT_SECONDS` | 单次上游默认 `8` 秒，最大 `20`；无自动重试 |
 | `LOOKUP_TIMEOUT_SECONDS` | 整批 lookup 默认 `20` 秒，最大 `25` |
+
+显式旧 ADAPTER_DB 或把含 identities 的旧文件指定为新缓存会拒绝启动，旧文件保持不变。新 cache 默认每60秒有界清理最多500条过期记录；TTL 到期不会改写 PostgreSQL。
 
 只需配置实际使用的服务凭据；缺少凭据的查询返回 `503`。所有 `_FILE` 文件需让容器 UID 10001 可读，通过只读挂载或 Compose secrets 提供，不与对应环境变量同时设置。
 
@@ -117,7 +142,7 @@ NOMINATIM_LOCAL_IDENTITIES_ONLY=true
 
 #### 接入现有 stack
 
-现有 TeslaMate stack 的配置片段和镜像取得方式见[开始使用](../README.zh-CN.md#开始使用)。需要新增 `georelay-adapter`，同时将现有应用的 `image` 换成 GeoRelay 镜像并设置 `NOMINATIM_BASE_URL` 和 `NOMINATIM_LOCAL_IDENTITIES_ONLY=true`。保留其他环境变量、数据库、MQTT、Grafana 服务及原有卷；自定义网络下将适配器加入应用所在网络，并保留外网出口。早期适配器升级可保留 `amap-adapter` 服务名和对应 Base URL，只更换镜像引用；不要因项目改名新建身份卷。
+现有 TeslaMate stack 的配置片段和镜像取得方式见[开始使用](../README.zh-CN.md#开始使用)。需要新增 `georelay-adapter`，同时将现有应用的 `image` 换成 GeoRelay 镜像并设置 `NOMINATIM_BASE_URL` 和 `GEORELAY_ADDRESS_MODE=application`。保留其他环境变量、数据库、MQTT、Grafana 服务及原有卷；自定义网络下将适配器加入应用所在网络，并保留外网出口。已有适配器服务保留 `amap-adapter` 服务名和对应 Base URL，命令中的服务名也按实际 stack 使用，原 Compose project 和卷保持不变。数据迁移步骤见下文，不能只更换镜像跳过初始化。
 
 #### 独立开发示例
 
@@ -147,9 +172,9 @@ docker build -t georelay-adapter:local adapter
 bash scripts/test_main_image.sh georelay:local georelay-adapter:local
 ```
 
-`prepare_upstream.py` 的目标目录必须不存在或为空。脚本核实 tag 解引用后的 commit，再严格应用两个地址补丁并检查空白；任何一步失败立即停止。
+`prepare_upstream.py` 的目标目录必须不存在或为空。脚本核实 tag 解引用后的 commit，再严格应用全部地址补丁并检查空白；任何一步失败立即停止。
 
-准备只修改地址集成需要的 HTTP、Locations 和 Geocoder 生产源码及对应测试。上游页面、名称、翻译、图标、法律文件和 Dockerfile 保持原样；这些内容变化或缺失不会触发本项目的额外审核门禁。应用仍显示 TeslaMate，仓库与镜像名为 GeoRelay。
+准备修改地址集成需要的 HTTP、Locations、Geocoder、本地身份模块、地址精度迁移及对应测试。上游页面、名称、翻译、图标、法律文件和 Dockerfile 保持原样；这些内容变化或缺失不会触发本项目的额外审核门禁。应用仍显示 TeslaMate，仓库与镜像名为 GeoRelay。
 
 上游检查脚本创建独立 Elixir/PostgreSQL 容器、随机网络和临时存储，无 host port，退出时清理。它执行官方编译、格式检查、原 Geocoder/HTTP 测试，以及新增 URL 配置和负数 signed bigint 数据库兼容测试。
 
@@ -159,26 +184,60 @@ bash scripts/test_main_image.sh georelay:local georelay-adapter:local
 
 ## 永久身份与备份
 
-同一规范化原始 WGS84 坐标始终对应同一个负数 `osm_id`，`osm_type=node`。它是适配器私有身份，不是真实 OSM 对象。重启、供应商切换、语言切换、TTL 到期和文字刷新均不改变身份；lookup 接受例如 `N-10001`。
+同一规范化精确 WGS84 坐标对应稳定负 `osm_id`、`osm_type=node`。应用 addresses 行是唯一永久坐标权威，编号序列只保存高水位，不复制坐标。真实 OSM 来源与独立境外证据保存在 `raw.georelay`；同一真实 OSM 对象可以对应多个本地地址。
 
-成功从官方 OSM 请求获得的真实对象来源保存在 SQLite。使用 OSM 的语言刷新按可信来源批量调用官方 `/lookup`，严格核对返回身份集合，再还原每条本地负 ID 和原坐标；同一 OSM 对象对应多个本地坐标时也分别保留本地身份。外部传入的任意正数身份不会被盲目转发。
+### 新安装
 
-升级时自动迁移缓存的策略维度，保留旧身份映射。升级前备份 SQLite；回退代码时旧版无法理解新的缓存键，应在离线恢复副本中处理文字缓存，不能删除永久身份表。
+只有从未使用旧 SQLite 身份库的安装才声明 fresh。PostgreSQL 当前没有负地址不能证明旧库没有分配过未引用编号。应用启动迁移不会自动选择 fresh：
 
-SQLite 保存永久身份，不能当作可随意删除的缓存。丢失或回退映射库可能让新分配 ID 与已有地址冲突。使用 SQLite 在线 backup API，输出路径必须不存在。在实际 stack 目录执行，使用与运行该 stack 相同的 `-f` / `-p` 参数：
+```sh
+docker compose exec -T teslamate bin/teslamate rpc 'IO.inspect(TeslaMate.Locations.LocalIdentities.initialize_fresh(fresh_install: true))'
+docker compose exec -T teslamate bin/teslamate rpc 'IO.inspect(TeslaMate.Locations.LocalIdentities.initialize_fresh(apply: true, fresh_install: true))'
+```
+
+先预览，确认成功再 apply；失败或证据不足停止。初始化标记保存在 PostgreSQL，未完成时地址功能拒绝工作，应用登录页仍可用。
+
+### 从旧 SQLite 迁移
+
+先在停写窗口取得 PostgreSQL 与旧 SQLite 的一致备份，并在隔离恢复副本演练。SQLite 使用旧版本的在线 backup API 或停止旧服务后复制，不复制活动 WAL 文件。旧版本快照示例：
 
 ```sh
 snapshot="adapter-snapshot-$(date -u +%Y%m%dT%H%M%SZ).sqlite3"
 docker compose exec -T georelay-adapter python -m adapter.server --backup "/data/$snapshot"
-docker compose cp "georelay-adapter:/data/$snapshot" "./$snapshot"
-chmod 600 "./$snapshot"
+docker compose cp "georelay-adapter:/data/$snapshot" ./legacy-identities.sqlite3
+chmod 600 ./legacy-identities.sqlite3
 ```
 
-仅当使用仓库的独立开发示例时，才在两条 Compose 命令中添加 `-f compose.example.yaml`。备份包含位置隐私，应与应用数据库备份一起受控保存到主机以外；验证副本后清理 `/data` 内快照。不要直接复制活动数据库文件。恢复时先停止 sidecar，恢复与 TeslaMate 数据一致的完整映射库，确认身份后再启动。`.osm.lock` 只保存限流时间，无需作为身份备份。
+上述 backup 必须在切换到新缓存版本前执行，新版本 `--backup` 只备份缓存。保留原 Compose project、卷与服务名；示例若与现有名称不同，应替换为实际服务名。备份与导出含精确位置，应保存在权限受控的目录并移出 Docker 主机。
 
-sidecar 的缓存 TTL 不会自动更新 PostgreSQL 里的已有地址。应用切换地址语言时，本地负数身份通过 `/lookup` 刷新，修改版将地点名、道路、门牌、行政字段和原始响应写回已有行，保留身份、坐标和关联。日常 reverse 仍复用同身份的已有数据库行。正数旧身份跳过刷新，保留原文字；不能通过切换语言自动迁移。
+仓库导出工具默认只读审计；通过后显式写出权限0600的导入文件：
 
-私人版本可能使用正数 hash，无法仅凭数值判断它是否为真实 OSM ID。旧地址身份导入、历史关联修复和 TeslaMate 数据库升级均属于独立迁移工作，需在恢复副本验证后另行执行。仅回退应用镜像不等于回滚已升级的数据库。
+```sh
+python3 scripts/export_legacy_identities.py ./legacy-identities.sqlite3
+python3 scripts/export_legacy_identities.py ./legacy-identities.sqlite3 --export --output ./legacy-identities.json
+```
+
+启动配套应用/适配器，设置 `GEORELAY_ADDRESS_MODE=application`，移除旧 `ADAPTER_DB`，使用独立 `ADAPTER_CACHE_DB`。将导出文件放进应用临时路径并保持只让应用用户读取；以下命令先预览，成功后再执行 apply：
+
+```sh
+docker compose cp ./legacy-identities.json teslamate:/tmp/georelay-identities.json
+docker compose exec -T --user root teslamate chown nonroot:nonroot /tmp/georelay-identities.json
+docker compose exec -T teslamate bin/teslamate rpc 'IO.inspect(TeslaMate.Locations.LocalIdentities.import_file("/tmp/georelay-identities.json"))'
+docker compose exec -T teslamate bin/teslamate rpc 'IO.inspect(TeslaMate.Locations.LocalIdentities.import_file("/tmp/georelay-identities.json", apply: true))'
+docker compose exec -T teslamate rm /tmp/georelay-identities.json
+```
+
+导入审计负身份/类型、完整 SQLite 已分配高水位（包括未引用记录和 AUTOINCREMENT 历史）、原坐标、来源与区域证据。恢复可证明的原精度，保留地址主键和负编号、行程/充电外键，不制造未引用空白地址。缺项、冲突、精度或来源证据不符会停止，不能按六位坐标或距离合并。
+
+导入提交为原子操作，完成后才建立精确坐标约束并启用新编号序列。地址坐标改用不限 scale NUMERIC；positions 仍为原六位精度，已有轨迹不修改。因此六位 Position 和恢复后的高精度 Address 可能是不同 canonical 点，不能强行复用。
+
+### 备份、缓存与回滚
+
+新模式只需将 PostgreSQL 作为永久数据备份。缓存和限流文件可以重建；停止适配器后删除新 cache 文件及其 WAL/SHM，不触碰旧身份档案，再启动服务并验证历史刷新。删除限流文件后仍遵守公共服务的启动限流。
+
+缓存到期不会自动更新 PostgreSQL；应用显式语言刷新写回地点、道路、门牌、行政字段及 raw，保留身份/原坐标/关联。新模式普通查找先复用已有地址。
+
+封存旧 SQLite 与迁移截止点的 PostgreSQL 备份。新应用开始分配编号后，旧库没有新增身份，不能只降级镜像回滚；需要恢复相同截止点的匹配备份并明确之后新增数据范围。不限 scale 坐标不能静默降回六位；本方案不提供长期双写或自动反向迁移。历史正数 hash 的迁移仍需单独方案。
 
 ## 版本跟进与发布
 
@@ -188,10 +247,10 @@ sidecar 的缓存 TTL 不会自动更新 PostgreSQL 里的已有地址。应用�
 2. 新版本创建 upstream/tag 分支与 PR，只修改 upstream.json。草稿、预发布、降级或移动 tag 停止处理；共享 prepare 只应用严格地址补丁；不重写或比对上游 UI、翻译、图标与法律文本，不追加 Dockerfile 指令。
 3. [Validate and build](../.github/workflows/ci.yml) 检出实际 PR head commit，原生 amd64/arm64 分别运行源码检查、共享 prepare/地址 ExUnit、镜像架构/用户与 adapter 许可检查，以及最终镜像内 adapter suite 和应用启动/迁移/地址闭环。应用保留上游 TeslaMate 界面，HTTP 就绪以实际登录表单为准。无需账号或真实地图 Key，使用独立临时资源。
 4. 两架构通过后，复用相同已测试产物发布两个 package 的 beta 版本并验证索引；当前 PR 可更新 beta-pr-N，不能改写 latest。
-5. [Beta release control](../.github/workflows/beta-control.yml) 从可信 main 读取 run、PR 与 registry 元数据。两架构/verify/beta 索引成功，PR 同仓且 open/non-draft、head 仍为 tested SHA、main 基线有效且服务器保护允许时，带 expected head SHA 普通 merge。fork、过期或被新提交替代的成功候选只跳过；控制器不执行候选脚本、不自动重写分支、不合并自身首次启用 PR。
+5. [Beta release control](../.github/workflows/beta-control.yml) 从可信 main 读取 run、PR 与 registry 元数据。两架构/verify/beta 索引与 Release 记录成功，PR 同仓且 open/non-draft、head 仍为 tested SHA、main 基线有效且服务器保护允许时，带 expected head SHA 普通 merge。fork、过期或被新提交替代的成功候选只跳过；控制器不执行候选脚本、不自动重写分支、不合并自身首次启用 PR。
 6. 合并回读成功后显式 dispatch main，绑定 expected_main_sha 与 source_pr；GITHUB_TOKEN 合并的 push 本身不会触发新 CI。main 对 merge commit 重新构建/测试，发布正式版本与 latest；推广前回读 current main。main 的镜像相关 push 或 main publish dispatch 也可正式发布，latest 跟随已审阅 main pin，无需等待尚未合入的新官方版本。
 
-成功、轻量检查和 check-only 不发通知。可信镜像构建、测试、合并操作、dispatch 或发布实际失败时发 Bark，含失败阶段、commit 与 PR/run 链接。beta 早期失败由可信控制器通知；main CI的独立收尾job直接通知正式失败，覆盖前序失败与发布job超时，避免依赖bot dispatch后未触发的workflow_run。稳定控制器不重复发送main通知。合并后的 main 失败不要求 PR 仍 open；关联API不可读时保留基本run通知。fork 和正常过期跳过不通知。
+成功、轻量检查和 check-only 不发通知。可信镜像构建、测试、合并操作、dispatch 或发布实际失败时发 Bark，含失败阶段（包括 Release 记录）、commit 与 PR/run 链接。beta 早期失败由可信控制器通知；main CI的独立收尾job直接通知正式失败，覆盖前序失败与发布job超时，避免依赖bot dispatch后未触发的workflow_run。稳定控制器不重复发送main通知。合并后的 main 失败不要求 PR 仍 open；关联API不可读时保留基本run通知。fork 和正常过期跳过不通知。
 
 ### 标签与运行服务更新
 
@@ -208,7 +267,7 @@ ghcr.io/srcheng17/georelay-adapter:<version>
 
 首页 Compose 和 .env.example 默认 latest；控制升级时机可设置同一 GEORELAY_VERSION 或分别锁定两个镜像 digest。版本标签本身不受 registry 强制不可变保证。两 package 无原子推广，任一上传/回读失败都会使 workflow 失败；若浮动标签暂不一致，使用已验证的相同固定版本。
 
-latest 发布不会自动替换运行容器。更新服务时，先备份 TeslaMate 数据库和适配器身份库，再从现有 stack 目录执行：
+latest 发布不会自动替换运行容器。更新服务时，先备份 TeslaMate 数据库、确认所选版本的迁移要求，再从现有 stack 目录执行：
 
 ```sh
 docker compose pull teslamate georelay-adapter
@@ -216,6 +275,27 @@ docker compose up -d teslamate georelay-adapter
 ```
 
 数据库迁移不能靠仅回退镜像撤销；本项目自动发布链路不执行这些生产操作。
+
+### Release 更新说明与补录
+
+每份已验证的固定双镜像对应同名 Git tag 和 [Release](https://github.com/srcheng17/georelay/releases)，tag 指向实际测试源码；beta 使用预发布 Release。正文列出本项目更新、上游版本、官方变更链接、两镜像 digest、平台与原 Actions attempt。上游自动更新仍只改 upstream.json，Release 会显示上游旧版本 → 新版本；不能证明此前发布基线时明确注明，不虚构版本范围。
+
+维护 adapter/patches 功能或迁移时，同一提交添加或更新 `docs/changes/*.md` 的可读说明；只重命名旧说明不算新内容。发布记录器从精确源码读取这些文字，冻结首次基线，重试保持人工添加的外围正文。
+
+固定镜像与浮动标签分别记录。过期来源或跳过别名的固定组仍有记录；别名部分失败时记录已验证的固定事实，整体发布仍失败。只有当前 main 正式源码的两个实际 latest 都匹配时才可设 GitHub latest。Release 记录失败也不算完整发布，控制器/updater/正式失败通知都检查该门禁。
+
+publisher 只保存数据 receipt，无源码写权限；独立可信 main job 验证原 run/attempt、官方 pin 与两个镜像索引后写 tag/Release，不执行候选脚本。receipt artifact 名为 `publication-receipt-<run>-<attempt>-<source>-<version>`，请求保留 90 天（受仓库上限），JSON 最多 64 KiB、ZIP 最多 1 MiB。缺失、过期或证据不匹配时停止，不能靠重建猜测原发布结果。
+
+仅记录失败时，在 main 手动运行 [Record existing image release](../.github/workflows/release-only.yml)，填写原 `original_run_id`、`original_attempt`、`original_source` 和 `original_version`。该流程只重验并补录，不构建或推送镜像，不推广别名、不更新容器。也可先从可信 main 本地执行只读预览：
+
+```sh
+python3 scripts/record_release.py --repository srcheng17/georelay \
+  --run-id RUN_ID --attempt ATTEMPT --source FULL_SHA --version FIXED_VERSION --repair
+```
+
+CLI 默认只读，`--apply` 才写。补录成功只替代失败的记录门禁；构建、verify、publish 或别名失败不会被豁免。updater 轮询补录结果并显式触发受限 beta 重评，再次核对当前 PR/head/base/保护，避免依赖 bot workflow_run 是否触发。
+
+可信 writer 首次需当前任务经明确审阅合入 main；main 尚无脚本时返回 `bootstrap_not_enabled`，不能作为完整 beta 放行。默认 GITHUB_TOKEN 对修改 workflow 的 beta 精确源码创建 tag/Release 的能力仍待获授权后实测；权限失败会明确阻断，不换用 PAT/App 或改写 tag 目标。
 
 ### GitHub 配置与首次生效
 

@@ -103,6 +103,7 @@ class PublicationTests(unittest.TestCase):
         for architecture in ("amd64", "arm64"):
             (self.artifacts / f"checked-images-{architecture}.tar").write_bytes(b"checked artifact")
         self.state = self.directory / "state.json"
+        self.receipt = self.directory / "publication-receipt.json"
         # Patch the existing HTTP helper inside child Python processes, never use the network.
         self.pythonpath = self.directory / "pythonpath"
         self.pythonpath.mkdir()
@@ -151,6 +152,7 @@ class PublicationTests(unittest.TestCase):
 
     def publish(self, **overrides):
         self.state.unlink(missing_ok=True)
+        self.receipt.unlink(missing_ok=True)
         event = overrides.pop("event", None)
         environment = {
             **os.environ,
@@ -160,6 +162,9 @@ class PublicationTests(unittest.TestCase):
             "GITHUB_EVENT_NAME": "push",
             "GITHUB_REPOSITORY": "example/georelay",
             "GITHUB_ACTOR": "isolated-test",
+            "GITHUB_RUN_ID": "11",
+            "GITHUB_RUN_ATTEMPT": "2",
+            "PUBLICATION_RECEIPT": str(self.receipt),
             "GHCR_TOKEN": "fake-test-only",
             "GITHUB_STEP_SUMMARY": str(self.directory / "summary.md"),
             "FAKE_STATE": str(self.state),
@@ -414,6 +419,24 @@ class PublicationTests(unittest.TestCase):
         result, commands = self.publish(**args, FAKE_PR_FAIL="1")
         self.assertNotEqual(result.returncode, 0)
         self.assertFalse(any("--prefer-index=false" in command for command in commands))
+
+    def test_receipt_survives_alias_failure_and_early_returns_but_not_partial_fixed_group(self):
+        result, commands = self.publish()
+        self.assertEqual(result.returncode, 0, result.stderr)
+        receipt = json.loads(self.receipt.read_text())
+        self.assertEqual((receipt["run_id"], receipt["attempt"]), (11, 2))
+        self.assertTrue(receipt["fixed_verified"])
+        self.assertEqual(receipt["floating"], dict(tag="latest", status="promoted", reason="verified"))
+        self.assertEqual(set(receipt["digests"]), {"georelay", "georelay-adapter"})
+        result, _ = self.publish(FAKE_FAIL_LATEST="georelay-adapter")
+        self.assertNotEqual(result.returncode, 0)
+        self.assertEqual(json.loads(self.receipt.read_text())["floating"]["status"], "failed")
+        result, _ = self.publish(GITHUB_EVENT_NAME="workflow_dispatch", PUBLISH_REQUESTED="true", GITHUB_REF="refs/heads/feature")
+        self.assertEqual(result.returncode, 0, result.stderr)
+        self.assertEqual(json.loads(self.receipt.read_text())["floating"], dict(tag="", status="skipped", reason="no_pr"))
+        result, _ = self.publish(FAKE_FAIL_VERSION_INDEX="georelay-adapter")
+        self.assertNotEqual(result.returncode, 0)
+        self.assertFalse(self.receipt.exists())
 
     def test_upstream_already_obsolete_at_start_keeps_strict_preflight(self):
         pin = json.loads((self.repo / "upstream.json").read_text())

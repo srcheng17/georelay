@@ -1,0 +1,54 @@
+name: Record existing image release
+run-name: release-record/${{ inputs.original_run_id }}/${{ inputs.original_attempt }}/${{ inputs.original_source }}/${{ inputs.original_version }}
+
+on:
+  workflow_dispatch:
+    inputs:
+      original_run_id:
+        description: Original Validate and build run ID
+        type: string
+        required: true
+      original_attempt:
+        description: Exact original attempt
+        type: string
+        required: true
+      original_source:
+        description: Exact tested source SHA
+        type: string
+        required: true
+      original_version:
+        description: Existing fixed version (no rebuilding)
+        type: string
+        required: true
+
+permissions:
+  contents: read
+
+jobs:
+  release-record:
+    if: github.ref == 'refs/heads/main'
+    concurrency:
+      group: ghcr-publication-${{ github.repository }}
+      cancel-in-progress: false
+    runs-on: ubuntu-latest
+    timeout-minutes: 15
+    permissions:
+      contents: write
+      actions: read
+      checks: read
+      packages: read
+      pull-requests: read
+    steps:
+      - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4
+        with:
+          ref: main
+          persist-credentials: false
+      - name: Verify original evidence and repair record without building or pushing
+        env:
+          GH_TOKEN: ${{ github.token }}
+          GITHUB_TOKEN: ${{ github.token }}
+          ORIGINAL_RUN_ID: ${{ inputs.original_run_id }}
+          ORIGINAL_ATTEMPT: ${{ inputs.original_attempt }}
+          ORIGINAL_SOURCE: ${{ inputs.original_source }}
+          ORIGINAL_VERSION: ${{ inputs.original_version }}
+        run: python3 scripts/record_release.py --repair --apply --output "$RUNNER_TEMP/release-record.json"

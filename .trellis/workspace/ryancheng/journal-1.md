@@ -510,7 +510,6 @@ Removed upstream branding edits and legal/visual snapshot gates; only two addres
 
 [OK] **Completed**
 
-
 ## Session 17: Beta automatic release and real main failure acceptance
 <!-- trellis-session: v=2 fp=e5a683c905ecaafb -->
 
@@ -532,3 +531,38 @@ PR13 automatically merged by GitHub Actions bot to 11e2e9d after native amd64/ar
 ### Status
 
 [OK] **Completed**
+
+## Session 18: PostgreSQL address ownership and image Release records
+<!-- trellis-session: v=2 fp=01b728571da8cd6a -->
+
+**Date**: 2026-10-03
+**Task**: PostgreSQL address ownership and image Release records
+**Branch**: `holy-shrimp`
+
+### Summary
+
+已确认实施并完成本地代码、跨层审查及隔离镜像验证；未 push/merge/publish/生产迁移，任务保留 in_progress 待外部门禁
+
+### Main Changes
+
+- PG管理永久身份、精确WGS84与来源；adapter仅可删除缓存，显式fresh/legacy及原子迁移
+- 可信main Release记录、上游变更说明、receipt及无重建补录；完成门禁和文档/spec同步
+
+### Git Commits
+
+| Hash | Message |
+|------|---------|
+| `fb9e1d0` | feat: own address identities in PostgreSQL and record image releases |
+
+### Testing
+
+- [OK] 173 Python、150 ExUnit通过；最终arm64 compiled fresh/legacy、adapter34及清理回读通过
+- [OK] null和错误合法来源零写回归、workflow静态检查、49个文档链接/Compose合并通过
+
+### Status
+
+[OK] **Completed**
+
+### Next Steps
+
+- 当前任务明确审阅后启用trusted-main writer，再授权验证native-token/云端双架构和匿名拉取；不得推断merge授权

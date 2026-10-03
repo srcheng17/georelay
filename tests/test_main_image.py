@@ -95,7 +95,8 @@ elif args[0] == "exec":
         if mode == "rpc-error":
             print("fake-private-error", file=sys.stderr)
             sys.exit(1)
-        print({"rpc-marker-missing": "unrelated", "rpc-marker-spoof": '\"GEORELAY_RUNTIME_LOCATIONS_OK\"'}.get(mode, "GEORELAY_RUNTIME_LOCATIONS_OK"))
+        marker = "GEORELAY_RUNTIME_LEGACY_OK" if os.environ.get("MAIN_IMAGE_IDENTITY_SCENARIO") == "legacy" else "GEORELAY_RUNTIME_LOCATIONS_OK"
+        print({"rpc-marker-missing": "unrelated", "rpc-marker-spoof": '\"GEORELAY_RUNTIME_LOCATIONS_OK\"'}.get(mode, marker))
         if mode == "rpc-return":
             print(":ok")
         sys.exit(0)
@@ -161,7 +162,7 @@ class MainImageSmokeTests(unittest.TestCase):
             self.assertFalse(set(command) & {"-p", "--publish", "-P", "--publish-all", "-v", "--volume"})
         self.assertNotIn("--mount", database)
         self.assertIn("NOMINATIM_BASE_URL=http://stub:8080", app)
-        self.assertIn("NOMINATIM_LOCAL_IDENTITIES_ONLY=true", app)
+        self.assertIn("GEORELAY_ADDRESS_MODE=application", app)
         self.assertTrue(app[app.index("--mount") + 1].endswith("runtime_locations.exs,readonly"))
         stub = next(command for command in commands if command[-1] == "/checks/runtime_geocoder_stub.py")
         self.assertIn("--pull=never", stub)
@@ -173,6 +174,16 @@ class MainImageSmokeTests(unittest.TestCase):
         self.assertIn("PGOPTIONS=-c statement_timeout=5000 -c lock_timeout=5000", commands[sql_index])
         for table in ("schema_migrations", "cars", "addresses", "positions", "drives", "charging_processes", "settings"):
             self.assertIn(table, commands[sql_index][-1])
+
+    def test_legacy_release_check_has_isolated_evidence_and_its_own_success_marker(self):
+        result, state, _ = self.smoke(MAIN_IMAGE_IDENTITY_SCENARIO="legacy")
+        self.assertEqual(result.returncode, 0, result.stderr)
+        app = next(command for command in state["commands"] if command[-1] == "app:checked")
+        mounts = [app[i + 1] for i, value in enumerate(app) if value == "--mount"]
+        self.assertTrue(any("runtime_legacy_locations.exs" in mount for mount in mounts))
+        self.assertTrue(any("runtime_legacy_identities.json" in mount and mount.endswith("readonly") for mount in mounts))
+        result, _, _ = self.smoke("rpc-marker-missing", MAIN_IMAGE_IDENTITY_SCENARIO="legacy")
+        self.assertNotEqual(result.returncode, 0)
 
     def test_early_exit_and_start_failure_fail_and_clean(self):
         for mode in ("app-exit", "db-exit", "stub-exit", "start-error"):
@@ -284,36 +295,60 @@ class MainImageSmokeTests(unittest.TestCase):
                 self.assertIn("compiled address RPC", result.stderr)
                 self.assertNotIn("smoke passed", result.stdout)
 
-    def test_public_fixture_http_contract_and_fallback_detection(self):
+    def test_public_fixture_protocol_precision_context_and_fallback_detection(self):
         spec = importlib.util.spec_from_file_location("runtime_geocoder_stub", ROOT / "scripts/runtime_geocoder_stub.py")
         module = importlib.util.module_from_spec(spec)
         spec.loader.exec_module(module)
         server = HTTPServer(("127.0.0.1", 0), module.Handler)
-        server.events = []
+        server.events, server.first_id = [], None
         thread = threading.Thread(target=server.serve_forever, daemon=True)
         thread.start()
         try:
             origin = "http://127.0.0.1:" + str(server.server_port)
-            def fetch(path, language="en"):
-                request = Request(origin + path, headers={"Accept-Language": language})
+            def fetch(path, payload=None):
+                data = None if payload is None else json.dumps(payload).encode()
+                request = Request(origin + path, data=data, headers={"Content-Type": "application/json"})
                 try:
                     response = urlopen(request, timeout=2)
                 except HTTPError as error:
                     response = error
                 with response:
                     return response.status, json.load(response)
-            reverse = "/reverse?format=jsonv2&lat=48.8584&lon=2.2945"
-            for _ in range(2):
-                status, body = fetch(reverse)
-                self.assertEqual((status, body["osm_id"], body["lat"]), (200, -10001, "48.8584"))
-            lookup = "/lookup?format=jsonv2&osm_ids=W42,N-10001"
-            status, body = fetch(lookup, "zh-CN")
-            self.assertEqual((status, body[0]["name"], body[0]["lat"]), (200, "Fixture Updated", "49.0"))
-            self.assertEqual(fetch(lookup, "missing"), (200, []))
-            self.assertEqual(fetch(lookup, "provider-fail"), (502, {"error": "fixture_provider_failure"}))
-            self.assertEqual(fetch(reverse.replace("48.8584", "48.8585")), (502, {"error": "fixture_provider_failure"}))
+            item = {"osm_id": -10001, "osm_type": "node", "lat": module.LAT, "lon": module.LON, "context": {"outside_mainland": False}}
+            reverse = {"version": 1, "address": item, "language": "en"}
+            status, body = fetch("/v1/reverse", reverse)
+            self.assertEqual((status, body["osm_id"], body["lat"]), (200, -10001, module.LAT))
+            self.assertEqual(body["georelay"], {"version": 1, **module.CONTEXT})
+            item["context"] = module.CONTEXT
+            lookup = {"version": 1, "addresses": [item], "language": "zh-CN"}
+            for language in ("zh-CN", "en"):
+                lookup["language"] = language
+                status, body = fetch("/v1/lookup", lookup)
+                self.assertEqual((status, body[0]["name"], body[0]["lat"]), (200, "Fixture Updated", module.LAT))
+            lookup["language"] = "missing"
+            self.assertEqual(fetch("/v1/lookup", lookup), (200, []))
+            lookup["language"] = "shifted"
+            self.assertEqual(fetch("/v1/lookup", lookup)[1][0]["lat"], "49")
+            lookup["language"] = "null-source"
+            status, body = fetch("/v1/lookup", lookup)
+            self.assertEqual(status, 200)
+            self.assertEqual(body[0]["georelay"], {"version": 1, "outside_mainland": False,
+                                                "source_osm_type": None, "source_osm_id": None})
+            lookup["language"] = "wrong-source"
+            status, body = fetch("/v1/lookup", lookup)
+            self.assertEqual(status, 200)
+            self.assertEqual(body[0]["georelay"]["source_osm_id"], 456)
+            lookup["language"] = "provider-fail"
+            self.assertEqual(fetch("/v1/lookup", lookup), (502, {"error": "fixture_provider_failure"}))
+            item["lat"] = "48.8585"
+            self.assertEqual(fetch("/v1/reverse", reverse), (502, {"error": "fixture_provider_failure"}))
+            item["lat"] = module.CONCURRENT_LAT
+            for candidate in range(-10002, -10010, -1):
+                item["osm_id"] = candidate
+                status, body = fetch("/v1/reverse", reverse)
+                self.assertEqual((status, body["osm_id"], body["lat"]), (200, candidate, module.CONCURRENT_LAT))
             self.assertEqual(fetch("/assertions"), (200, {"ok": True}))
-            fetch(reverse)  # An unexpected reverse fallback invalidates the RPC gate.
+            self.assertEqual(fetch("/reverse?lat=48.8584&lon=2.2945")[0], 426)
             self.assertEqual(fetch("/assertions"), (200, {"ok": False}))
         finally:
             server.shutdown()
@@ -331,7 +366,10 @@ class MainImageSmokeTests(unittest.TestCase):
         workflow = (ROOT / ".github/workflows/ci.yml").read_text()
         call = workflow.index("run: exec bash scripts/test_main_image.sh georelay:checked georelay-adapter:checked")
         self.assertLess(workflow.index("docker build --platform"), call)
-        self.assertLess(call, workflow.index("docker save"))
+        legacy = workflow.index("name: Legacy identity import in compiled release")
+        self.assertIn("MAIN_IMAGE_IDENTITY_SCENARIO: legacy", workflow)
+        self.assertLess(call, legacy)
+        self.assertLess(legacy, workflow.index("docker save"))
         for runner in ("ubuntu-latest", "ubuntu-24.04-arm"):
             self.assertIn("runner: " + runner, workflow)
 

@@ -4,6 +4,20 @@ on:
   workflow_run:
     workflows: [Validate and build]
     types: [completed]
+  workflow_dispatch:
+    inputs:
+      original_run_id:
+        description: Original run to reevaluate after trusted recording repair
+        type: string
+        required: true
+      original_attempt:
+        description: Exact original attempt
+        type: string
+        required: true
+      repair_run_id:
+        description: Successful main release-only run (only record gate can be repaired)
+        type: string
+        required: true
 
 permissions:
   contents: read
@@ -15,7 +29,7 @@ concurrency:
 
 jobs:
   control:
-    if: github.event.workflow_run.head_repository.full_name == github.repository
+    if: github.ref == 'refs/heads/main' && (github.event_name == 'workflow_dispatch' || github.event.workflow_run.head_repository.full_name == github.repository)
     runs-on: ubuntu-latest
     timeout-minutes: 15
     permissions:

@@ -1,0 +1,31 @@
+{
+  "id": "application-owned-geocoding",
+  "name": "application-owned-geocoding",
+  "title": "永久地址身份归 TeslaMate，适配器仅保留缓存",
+  "description": "由 TeslaMate/PostgreSQL 管理永久地址身份与原始坐标，刷新时传给适配器，消除第二套永久映射并保留历史身份与关联",
+  "status": "in_progress",
+  "dev_type": null,
+  "scope": null,
+  "package": null,
+  "priority": "P2",
+  "creator": "ryancheng",
+  "assignee": "ryancheng",
+  "createdAt": "2026-10-03",
+  "completedAt": null,
+  "branch": "holy-shrimp",
+  "base_branch": "main",
+  "worktree_path": null,
+  "commit": null,
+  "pr_url": null,
+  "subtasks": [],
+  "children": [
+    "10-03-image-release-notes"
+  ],
+  "parent": null,
+  "relatedFiles": [],
+  "notes": "",
+  "meta": {
+    "architecture": "application-owned-identities",
+    "planning_context": "codex-georelay-address-ownership-20261003"
+  }
+}
