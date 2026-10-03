@@ -1,0 +1,6 @@
+{"file": ".trellis/spec/backend/contracts.md", "reason": "Current address/provider/privacy invariants; task design supersedes old identity ownership only."}
+{"file": ".trellis/spec/backend/quality-guidelines.md", "reason": "Pinned upstream, isolated validation, release evidence and Git review requirements."}
+{"file": ".trellis/spec/guides/cross-layer-thinking-guide.md", "reason": "Trace application, adapter, provider, persistence and failure boundaries."}
+{"file": ".trellis/tasks/10-03-application-owned-geocoding/research/application-ownership.md", "reason": "Fixed upstream precision, identity allocation, migration and concurrency research."}
+{"file": ".trellis/tasks/10-03-image-release-notes/research/release-records.md", "reason": "Cross-deliverable release records, enablement ordering and actual publication evidence boundaries."}
+{"file": ".trellis/tasks/10-03-image-release-notes/research/planning-review.md", "reason": "Resolved independent planning review: repair readiness, receipt persistence, fixed baseline, token permissions and bot observer gaps."}

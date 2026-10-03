@@ -9,4 +9,6 @@ Modification dates / 修改日期：
 - 2026-10-02: Added a Python standard-library AMap/OSM adapter with permanent local identities, SQLite caching and backup; preserved AMap place names and added configurable AMap/Baidu/OSM providers.
 - 2026-10-03: Local lookup skips historical positive identities and refreshes mainland batches with bounded concurrency while preserving local identity, request order and the batch deadline. Renamed the distributed service to GeoRelay and added this dated modification notice to the image.
 
+- 2026-10-03: Replaced sidecar-owned permanent identities with the versioned application-owned address protocol. PostgreSQL supplies identities, exact WGS84 coordinates and verified routing context; SQLite now holds only disposable, identity-free result templates with bounded expiry cleanup. Legacy identity databases are rejected without modification and cache backups use a separate path.
+
 Corresponding Source: https://github.com/srcheng17/georelay. The image's `org.opencontainers.image.revision` identifies the exact commit: open `https://github.com/srcheng17/georelay/tree/<revision>` and use `adapter/` and its build scripts. The `org.opencontainers.image.source` label links to the source repository. 镜像标签保留本仓库完整 commit；按该 commit 获取对应源码与构建脚本。

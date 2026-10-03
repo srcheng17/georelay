@@ -12,16 +12,11 @@ python3 - "$root" "$source_dir" <<'PY'
 from pathlib import Path
 import sys
 sys.path.insert(0, str(Path(sys.argv[1]) / "scripts"))
-from prepare_upstream import git, load_pin
-if git(sys.argv[2], "rev-parse", "HEAD") != load_pin()["commit"]:
-    raise SystemExit("incorrect upstream commit")
-patches = sorted((Path(sys.argv[1]) / "patches").glob("*.patch"))
-if not patches:
-    raise SystemExit("no upstream patch found")
-git(sys.argv[2], "apply", "--reverse", "--check", *(str(p) for p in patches))
+from prepare_upstream import verify_patched
+verify_patched(sys.argv[2])
 PY
 
-name="teslamate-amap-check-$(date +%s)-$$"
+name="georelay-check-$(date +%s)-$$"
 cleanup() {
   docker rm -fv "$name-elixir" "$name-db" >/dev/null 2>&1 || true
   docker network rm "$name" >/dev/null 2>&1 || true
@@ -53,13 +48,18 @@ docker run --rm --name "$name-elixir" --network "$name" \
     mix compile --warnings-as-errors
     mix format --check-formatted \
       lib/teslamate/http.ex lib/teslamate/locations.ex lib/teslamate/locations/geocoder.ex \
+      lib/teslamate/locations/address.ex lib/teslamate/locations/local_identities.ex \
+      priv/repo/migrations/20261003000000_prepare_application_address_identities.exs \
       test/teslamate/http_test.exs test/teslamate/settings_test.exs \
       test/teslamate/locations/geocoder_adapter_test.exs \
-      test/teslamate/locations/addresses_adapter_test.exs
+      test/teslamate/locations/addresses_adapter_test.exs \
+      test/teslamate/locations/addresses_test.exs \
+      test/teslamate/locations/local_identities_test.exs
     mix test --warnings-as-errors \
       test/teslamate/http_test.exs test/teslamate/settings_test.exs \
       test/teslamate/locations/addresses_test.exs \
       test/teslamate/locations/geocoder_test.exs \
       test/teslamate/locations/geocoder_adapter_test.exs \
-      test/teslamate/locations/addresses_adapter_test.exs
+      test/teslamate/locations/addresses_adapter_test.exs \
+      test/teslamate/locations/local_identities_test.exs
   '

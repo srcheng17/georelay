@@ -14,7 +14,7 @@ from urllib.parse import urlsplit
 from urllib.request import HTTPRedirectHandler, Request, build_opener
 
 
-STAGES = {"beta_validation", "beta_jobs", "beta_index", "merge_readiness", "branch_protection", "merge", "main_dispatch", "main_publication"}
+STAGES = {"beta_validation", "beta_jobs", "beta_index", "release_record", "merge_readiness", "branch_protection", "merge", "main_dispatch", "main_publication"}
 
 
 class NoRedirect(HTTPRedirectHandler):
@@ -51,7 +51,7 @@ def payload(report):
     if item.get("run_url") != link:
         raise ValueError("Invalid run link")
     jobs = item.get("failed_jobs", [])
-    if not isinstance(jobs, list) or any(job not in {"checks", "build-amd64", "build-arm64", "verify", "publish"} for job in jobs):
+    if not isinstance(jobs, list) or any(job not in {"checks", "build-amd64", "build-arm64", "verify", "publish", "release-record"} for job in jobs):
         raise ValueError("Invalid failure jobs")
     result = item.get("conclusion", "failure")
     if result not in {"failure", "cancelled", "timed_out", "action_required", "startup_failure", "success"}:

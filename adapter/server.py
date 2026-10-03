@@ -5,7 +5,7 @@ BAIDU_AK and BAIDU_SK each support a mutually exclusive _FILE source.
 GEOCODER_PROVIDER defaults to auto; MAINLAND_PROVIDER defaults to amap.
 AMAP_API_REGION=mainland (default) or global selects the AMap API and datum.
 NOMINATIM_USER_AGENT must identify the operator for public OSM requests.
-ADAPTER_DB defaults to /data/adapter.sqlite3. CACHE_TTL_SECONDS defaults to 86400,
+ADAPTER_CACHE_DB defaults to /data/cache.sqlite3; legacy ADAPTER_DB is rejected. CACHE_TTL_SECONDS defaults to 86400,
 UPSTREAM_TIMEOUT_SECONDS to 8, and LOOKUP_TIMEOUT_SECONDS to 20. No retries.
 --backup DEST uses SQLite's online backup API; DEST must not already exist.
 """
@@ -25,6 +25,7 @@ import re
 import sqlite3
 import subprocess
 import sys
+import threading
 import time
 import urllib.error
 import urllib.parse
@@ -42,6 +43,9 @@ CHINA_NAMES = frozenset({"中国", "中华人民共和国", "china"})
 MAX_BODY = 1024 * 1024
 MAX_IDS = 50  # TeslaMate Locations.update_addresses/1 batches 50 identities.
 MAX_ID = 2**63 - 1
+MAX_REQUEST_BODY = 65536
+CACHE_CLEANUP_INTERVAL = 60
+CACHE_CLEANUP_LIMIT = 500
 
 
 class AdapterError(Exception):
@@ -52,13 +56,13 @@ class AdapterError(Exception):
 
 def coordinate(value, limit):
     """Canonical decimal text without float conversion or Decimal rounding."""
-    if not isinstance(value, str) or len(value) > 80 or not re.fullmatch(
-        r"[+-]?(?:[0-9]+(?:\.[0-9]*)?|\.[0-9]+)(?:[eE][+-]?[0-9]{1,3})?", value
+    if not isinstance(value, str) or len(value) > 2050 or not re.fullmatch(
+        r"[+-]?(?:[0-9]+(?:\.[0-9]*)?|\.[0-9]+)(?:[eE][+-]?[0-9]{1,4})?", value
     ):
         raise AdapterError(400, "Invalid coordinates")
     try:
         number = Decimal(value)
-        if not number.is_finite() or number.copy_abs() > limit or abs(number.as_tuple().exponent) > 80:
+        if not number.is_finite() or number.copy_abs() > limit or abs(number.as_tuple().exponent) > 1024 or len(number.as_tuple().digits) > 1024:
             raise InvalidOperation
     except InvalidOperation:
         raise AdapterError(400, "Invalid coordinates") from None
@@ -209,10 +213,10 @@ def osm_identity(payload):
 def osm_address(payload, identity, lat, lon):
     payload = mapping(payload)
     address = {key: text(value) for key, value in mapping(payload.get("address")).items() if text(value)}
-    if "error" in payload or not text(payload.get("display_name")) or not address:
+    if "error" in payload or text(payload.get("display_name")) in {"", "Unable to geocode"} or not address:
         raise AdapterError(502, "Invalid upstream response")
     osm_identity(payload)
-    # Upstream identities are provenance only; the adapter owns stable identity.
+    # Upstream identities are provenance only; PostgreSQL owns stable identity.
     return {
         "osm_id": -identity, "osm_type": "node", "lat": lat, "lon": lon,
         "display_name": payload["display_name"],
@@ -244,7 +248,7 @@ def nominatim(payload, identity, lat, lon):
     payload = mapping(payload)
     regeo = mapping(payload.get("regeocode"))
     display_name = text(regeo.get("formatted_address"))
-    if payload.get("status") != "1" or not display_name:
+    if payload.get("status") != "1" or display_name in {"", "Unable to geocode"}:
         raise AdapterError(502, "Invalid upstream response")
     parts = mapping(regeo.get("addressComponent"))
     street = mapping(parts.get("streetNumber"))
@@ -279,7 +283,7 @@ def baidu_address(payload, identity, lat, lon):
     payload = mapping(payload)
     result = mapping(payload.get("result"))
     display_name = text(result.get("formatted_address"))
-    if type(payload.get("status")) is not int or payload["status"] != 0 or not display_name:
+    if type(payload.get("status")) is not int or payload["status"] != 0 or display_name in {"", "Unable to geocode"}:
         raise AdapterError(502, "Invalid upstream response")
     parts = mapping(result.get("addressComponent"))
     regions, pois = result.get("poiRegions"), result.get("pois")
@@ -305,6 +309,80 @@ def baidu_address(payload, identity, lat, lon):
     }
 
 
+def language_value(value):
+    if not isinstance(value, str) or len(value) > 128 or any(ord(c) < 32 or ord(c) > 126 for c in value):
+        raise AdapterError(400, "Invalid language")
+    return value.strip().lower()
+
+
+def request_address(value, allow_positive=False):
+    if not isinstance(value, dict) or set(value) - {"osm_id", "osm_type", "lat", "lon", "context"}:
+        raise AdapterError(400, "Invalid address")
+    identity, kind = value.get("osm_id"), value.get("osm_type")
+    if type(identity) is not int or not 0 < abs(identity) <= MAX_ID or kind not in ("node", "way", "relation"):
+        raise AdapterError(400, "Invalid identity")
+    if identity > 0:
+        if not allow_positive:
+            raise AdapterError(422, "Unsupported identity")
+        # Historical positive identities cannot be treated as trusted OSM sources.
+        return None
+    if kind != "node":
+        raise AdapterError(422, "Unsupported identity")
+    if set(value) != {"osm_id", "osm_type", "lat", "lon", "context"}:
+        raise AdapterError(400, "Missing address context")
+    lat, lon = coordinate(value["lat"], 90), coordinate(value["lon"], 180)
+    if lat != value["lat"] or lon != value["lon"]:
+        raise AdapterError(400, "Coordinates must be canonical")
+    context = value["context"]
+    if (not isinstance(context, dict) or set(context) - {"source_osm_type", "source_osm_id", "outside_mainland"}
+            or type(context.get("outside_mainland")) is not bool):
+        raise AdapterError(400, "Invalid address context")
+    source_type, source_id = context.get("source_osm_type"), context.get("source_osm_id")
+    if "source_osm_type" in context or "source_osm_id" in context:
+        if (source_type not in ("node", "way", "relation") or type(source_id) is not int
+                or not 0 < source_id <= MAX_ID):
+            raise AdapterError(400, "Invalid source identity")
+    return {"osm_id": identity, "osm_type": "node", "lat": lat, "lon": lon, "context": dict(context)}
+
+
+def request_document(value, endpoint):
+    field = "address" if endpoint == "/v1/reverse" else "addresses"
+    if (not isinstance(value, dict) or set(value) - {"version", field, "language", "provider"}
+            or not {"version", field, "language"} <= set(value)):
+        raise AdapterError(400, "Invalid protocol request")
+    if type(value["version"]) is not int or value["version"] != 1:
+        raise AdapterError(400, "Unsupported protocol version")
+    if "provider" in value and value["provider"] not in ("amap", "baidu", "osm"):
+        raise AdapterError(400, "Invalid provider")
+    language = language_value(value["language"])
+    return value[field], language, value.get("provider")
+
+
+def unique_object(pairs):
+    result = {}
+    for key, value in pairs:
+        if key in result:
+            raise AdapterError(400, "Duplicate JSON field")
+        result[key] = value
+    return result
+
+
+def require_cache_schema(db):
+    # Inspect table names only: never read or migrate permanent legacy records.
+    tables = {row[0] for row in db.execute("SELECT name FROM sqlite_master WHERE type='table'")}
+    if "identities" in tables:
+        raise ValueError("Legacy identity database must be archived separately")
+    if tables - {"cache"}:
+        raise ValueError("Invalid cache database schema")
+    if "cache" in tables:
+        columns = {row[1] for row in db.execute("PRAGMA table_info(cache)")}
+        if columns != {"cache_key", "language", "policy", "expires", "body"}:
+            raise ValueError("Invalid cache database schema")
+        if db.execute("PRAGMA user_version").fetchone()[0] != 1:
+            raise ValueError("Unsupported cache database version")
+    return "cache" in tables
+
+
 class Adapter:
     def __init__(self, path, key="", ttl=86400, timeout=8, lookup_timeout=20, user_agent="",
                  provider="auto", mainland_provider="amap", baidu_ak="", baidu_sk="", amap_region="mainland"):
@@ -318,116 +396,101 @@ class Adapter:
         self.provider, self.mainland_provider = provider, mainland_provider
         self.baidu_ak, self.baidu_sk = baidu_ak, baidu_sk
         self.amap_region = amap_region
+        self._cleanup_lock, self._next_cleanup = threading.Lock(), 0
+        self._osm_started = time.time()
+        if Path(path).exists():
+            with contextlib.closing(sqlite3.connect(Path(path).resolve().as_uri() + "?mode=ro", uri=True)) as db:
+                require_cache_schema(db)
         with self.connect() as db:
             db.execute("BEGIN IMMEDIATE")
-            db.execute("""
-                CREATE TABLE IF NOT EXISTS identities (
-                    id INTEGER PRIMARY KEY AUTOINCREMENT,
-                    lat TEXT NOT NULL, lon TEXT NOT NULL,
-                    source_osm_id INTEGER, source_osm_type TEXT,
-                    outside_mainland INTEGER NOT NULL DEFAULT 0, UNIQUE(lat, lon)
-                )
-            """)
-            # Preserve IDs from an earlier schema; the map must never be rebuilt.
-            columns = {row[1] for row in db.execute("PRAGMA table_info(identities)")}
-            for name, kind in [("source_osm_id", "INTEGER"), ("source_osm_type", "TEXT")]:
-                if name not in columns:
-                    db.execute(f"ALTER TABLE identities ADD COLUMN {name} {kind}")
-            if "outside_mainland" not in columns:
-                db.execute("ALTER TABLE identities ADD COLUMN outside_mainland INTEGER NOT NULL DEFAULT 0")
-                # Only the old schema's OSM sources implied confirmed overseas.
-                db.execute("UPDATE identities SET outside_mainland=1 WHERE source_osm_id IS NOT NULL")
+            require_cache_schema(db)
             db.execute("""
                 CREATE TABLE IF NOT EXISTS cache (
-                    identity INTEGER NOT NULL REFERENCES identities(id),
-                    language TEXT NOT NULL, policy TEXT NOT NULL,
-                    expires REAL NOT NULL, body TEXT NOT NULL,
-                    PRIMARY KEY(identity, language, policy)
+                    cache_key TEXT PRIMARY KEY, language TEXT NOT NULL, policy TEXT NOT NULL,
+                    expires REAL NOT NULL, body TEXT NOT NULL
                 )
             """)
-            if "policy" not in {row[1] for row in db.execute("PRAGMA table_info(cache)")}:
-                db.execute("""CREATE TABLE cache_next (
-                    identity INTEGER NOT NULL REFERENCES identities(id),
-                    language TEXT NOT NULL, policy TEXT NOT NULL,
-                    expires REAL NOT NULL, body TEXT NOT NULL,
-                    PRIMARY KEY(identity, language, policy))""")
-                db.execute("INSERT INTO cache_next SELECT identity,language,'auto:amap',expires,body FROM cache")
-                db.execute("DROP TABLE cache")
-                db.execute("ALTER TABLE cache_next RENAME TO cache")
+            db.execute("CREATE INDEX IF NOT EXISTS cache_expires_index ON cache(expires)")
+            db.execute("PRAGMA user_version=1")
 
     @contextlib.contextmanager
     def connect(self, deadline=None):
         timeout = min(1, remaining(deadline)) if deadline else 1
         with contextlib.closing(sqlite3.connect(self.path, timeout=timeout)) as db:
-            db.execute("PRAGMA foreign_keys=ON")
             with db:
                 yield db
 
     def health(self):
         with self.connect() as db:
             db.execute("BEGIN IMMEDIATE")
-            db.execute("SELECT id FROM identities LIMIT 1").fetchone()
-        return {"status": "ok"}
+            try:
+                valid = require_cache_schema(db)
+            except ValueError:
+                raise AdapterError(503, "Invalid cache database schema") from None
+            if not valid:
+                raise sqlite3.DatabaseError("Cache is unavailable")
+            db.execute("SELECT cache_key FROM cache LIMIT 1").fetchone()
+        return {"status": "ok", "protocol": 1, "storage": "disposable-cache"}
+
+    def cleanup(self, deadline):
+        if time.monotonic() < self._next_cleanup or not self._cleanup_lock.acquire(blocking=False):
+            return
+        try:
+            if time.monotonic() < self._next_cleanup:
+                return
+            with self.connect(deadline) as db:
+                db.execute("DELETE FROM cache WHERE cache_key IN (SELECT cache_key FROM cache WHERE expires<=? LIMIT ?)",
+                           (time.time(), CACHE_CLEANUP_LIMIT))
+            self._next_cleanup = time.monotonic() + CACHE_CLEANUP_INTERVAL
+        finally:
+            self._cleanup_lock.release()
 
     def policy(self, provider):
         if provider is None:
             provider = self.provider
-        elif provider not in {"amap", "baidu", "osm"}:
+        elif provider not in ("amap", "baidu", "osm"):
             raise AdapterError(400, "Invalid provider")
         policy = "auto:" + self.mainland_provider if provider == "auto" else provider
         return policy + ":global" if policy.endswith("amap") and self.amap_region == "global" else policy
 
-    def reverse(self, lat, lon, language="", provider=None):
-        policy = self.policy(provider)
-        deadline = time.monotonic() + min(25, 2 * self.timeout + 1)
-        lat, lon = coordinate(lat, 90), coordinate(lon, 180)
-        with self.connect(deadline) as db:
-            db.execute("BEGIN IMMEDIATE")
-            row = db.execute("SELECT id FROM identities WHERE lat=? AND lon=?", (lat, lon)).fetchone()
-            if row is None:
-                identity = db.execute("INSERT INTO identities(lat,lon) VALUES(?,?)", (lat, lon)).lastrowid
-            else:
-                identity = row[0]
-        return self.address(identity, lat, lon, language, deadline, policy)
+    def cache_key(self, address, language, policy):
+        # Candidate identity deliberately excluded; all routing evidence included.
+        return json.dumps([address["lat"], address["lon"], language, policy, address["context"]], sort_keys=True, separators=(",", ":"))
 
-    def lookup(self, osm_ids, language="", provider=None):
-        policy = self.policy(provider)
+    def reverse(self, address, language="", provider=None):
+        policy, language = self.policy(provider), language_value(language)
+        address = request_address(address)
+        deadline = time.monotonic() + min(25, 2 * self.timeout + 1)
+        self.cleanup(deadline)
+        return self.address(address, language, deadline, policy)
+
+    def lookup(self, addresses, language="", provider=None):
+        policy, language = self.policy(provider), language_value(language)
         deadline = time.monotonic() + self.lookup_timeout
-        if osm_ids == "":
-            return []  # Official details([]) can send an empty list.
-        ids = osm_ids.split(",")
-        if len(ids) > MAX_IDS:
-            raise AdapterError(400, "Too many identities")
-        identities = []
-        for value in ids:
-            if not re.fullmatch(r"[NWR]-?[1-9][0-9]{0,18}", value):
-                raise AdapterError(400, "Invalid identity")
-            identity = int(value[1:])
-            if abs(identity) > MAX_ID:
-                raise AdapterError(400, "Invalid identity")
-            if identity > 0:
-                continue  # Historical positive IDs have no trusted provenance.
-            if value[0] != "N":
-                raise AdapterError(422, "Unsupported identity")
-            identities.append(-identity)
-        if not identities:
-            return []
+        if not isinstance(addresses, list) or len(addresses) > MAX_IDS:
+            raise AdapterError(400, "Invalid address batch")
         rows = []
-        with self.connect(deadline) as db:
-            for identity in dict.fromkeys(identities):
-                row = db.execute("SELECT lat,lon,source_osm_type,source_osm_id,outside_mainland FROM identities WHERE id=?", (identity,)).fetchone()
-                if row is None:
-                    raise AdapterError(404, "Identity not found")
-                rows.append((identity, *row))
+        identities = set()
+        for value in addresses:
+            address = request_address(value, allow_positive=True)
+            if address is None:
+                continue
+            if address["osm_id"] in identities:
+                raise AdapterError(400, "Duplicate identity")
+            identities.add(address["osm_id"])
+            rows.append(address)
+        if not rows:
+            return []
+        self.cleanup(deadline)
         self.refresh_osm_batch(rows, language, deadline, policy)
         pool = concurrent.futures.ThreadPoolExecutor(max_workers=4)
         try:
-            futures = [pool.submit(self.address, *row[:3], language, deadline, policy) for row in rows]
+            futures = [pool.submit(self.address, row, language, deadline, policy) for row in rows]
             done, pending = concurrent.futures.wait(
                 futures, timeout=remaining(deadline), return_when=concurrent.futures.FIRST_EXCEPTION,
             )
             for future in done:
-                future.result()  # Propagate any failure before waiting for ordered results.
+                future.result()
             if pending:
                 raise concurrent.futures.TimeoutError
             remaining(deadline)
@@ -435,7 +498,6 @@ class Adapter:
         except concurrent.futures.TimeoutError:
             raise AdapterError(504, "Lookup request timed out") from None
         finally:
-            # Running requests already share the deadline; cancel queued work.
             pool.shutdown(wait=False, cancel_futures=True)
 
     def refresh_osm_batch(self, rows, language, deadline, policy):
@@ -443,13 +505,15 @@ class Adapter:
             return
         stale = {}
         with self.connect(deadline) as db:
-            for identity, lat, lon, source_type, source_id, outside in rows:
-                if source_id is None or (policy != "osm" and not outside):
+            for row in rows:
+                context = row["context"]
+                if "source_osm_id" not in context or (policy != "osm" and not context["outside_mainland"]):
                     continue
-                cached = db.execute("SELECT expires FROM cache WHERE identity=? AND language=? AND policy=?", (identity, language, policy)).fetchone()
+                cached = db.execute("SELECT expires FROM cache WHERE cache_key=?", (self.cache_key(row, language, policy),)).fetchone()
                 if cached and cached[0] > time.time():
                     continue
-                stale.setdefault((source_type, source_id), []).append((identity, lat, lon))
+                source = context["source_osm_type"], context["source_osm_id"]
+                stale.setdefault(source, []).append(row)
         if not stale:
             return
         ids = ",".join(kind[0].upper() + str(identity) for kind, identity in stale)
@@ -464,10 +528,14 @@ class Adapter:
             if policy != "osm":
                 require_outside_mainland(item, AdapterError(502, "Unexpected upstream coverage"))
             found[source] = item
-        bodies = [osm_address(found[source], *row) for source, local_rows in stale.items() for row in local_rows]
+        # Validate the entire upstream set before storing any batch result.
+        bodies = [(row, self.template(osm_address(found[source], 0, row["lat"], row["lon"]), row, policy))
+                  for source, local_rows in stale.items() for row in local_rows]
+        remaining(deadline)
         with self.connect(deadline) as db:
-            for body in bodies:
-                self.cache_result(db, body, language, policy)
+            for row, body in bodies:
+                self.cache_result(db, row, body, language, policy)
+            remaining(deadline)
 
     def keyed_payload(self, provider, lat, lon, language, deadline):
         timeout = min(self.timeout, remaining(deadline))
@@ -481,22 +549,52 @@ class Adapter:
             raise AdapterError(503, "Baidu credentials are not configured")
         return upstream("baidu", self.baidu_ak, lat, lon, language, "", timeout, None, self.baidu_sk)
 
-    def address(self, identity, lat, lon, language, deadline, policy):
+    def response(self, template, address):
+        return {**template, "osm_id": address["osm_id"], "osm_type": "node", "lat": address["lat"], "lon": address["lon"]}
+
+    def template(self, body, address, policy):
+        body = {key: value for key, value in body.items() if key not in {"osm_id", "osm_type", "lat", "lon"}}
+        context = {"version": 1, **address["context"]}
+        source = body.get("upstream", {})
+        if source.get("provider") == "osm":
+            context.update(source_osm_type=source["osm_type"], source_osm_id=source["osm_id"])
+            if policy.startswith("auto:"):
+                context["outside_mainland"] = True
+        body["georelay"] = context
+        return body
+
+    def address(self, row, language, deadline, policy):
+        lat, lon, outside = row["lat"], row["lon"], row["context"]["outside_mainland"]
+        cache_key = self.cache_key(row, language, policy)
         with self.connect(deadline) as db:
-            cached = db.execute("SELECT expires,body FROM cache WHERE identity=? AND language=? AND policy=?", (identity, language, policy)).fetchone()
-            outside = db.execute("SELECT outside_mainland FROM identities WHERE id=?", (identity,)).fetchone()[0]
+            cached = db.execute("SELECT expires,body FROM cache WHERE cache_key=?", (cache_key,)).fetchone()
         remaining(deadline)
         if cached and cached[0] > time.time():
-            return json.loads(cached[1])
+            try:
+                template = json.loads(cached[1])
+                if (not isinstance(template, dict) or any(key in template for key in ("osm_id", "osm_type", "lat", "lon"))
+                        or text(template.get("display_name")) in {"", "Unable to geocode"}
+                        or not isinstance(template.get("georelay"), dict)
+                        or type(template["georelay"].get("version")) is not int
+                        or template["georelay"]["version"] != 1
+                        or type(template["georelay"].get("outside_mainland")) is not bool):
+                    raise ValueError
+                cached_context = {key: value for key, value in template["georelay"].items() if key != "version"}
+                request_address({**row, "context": cached_context})
+                if row["context"]["outside_mainland"] and not cached_context["outside_mainland"]:
+                    raise ValueError
+            except (AdapterError, ValueError, TypeError):
+                raise AdapterError(503, "Invalid cache data") from None
+            return self.response(template, row)
         if policy == "osm":
             payload = self.osm(lat, lon, language, deadline)
-            body = osm_address(payload, identity, lat, lon)
+            body = osm_address(payload, 0, lat, lon)
         elif not policy.startswith("auto:"):
             provider = policy.split(":")[0]
             payload = self.keyed_payload(provider, lat, lon, language, deadline)
             if provider == "amap" and self.amap_region == "mainland" and not mainland_response(payload):
                 raise AdapterError(502, "Unexpected upstream coverage")
-            body = (nominatim if provider == "amap" else baidu_address)(payload, identity, lat, lon)
+            body = (nominatim if provider == "amap" else baidu_address)(payload, 0, lat, lon)
         else:
             body = None
             provider = policy.split(":")[1]
@@ -505,29 +603,25 @@ class Adapter:
                 try:
                     payload = self.keyed_payload(provider, lat, lon, language, deadline)
                     if mainland_response(payload, provider):
-                        body = (nominatim if provider == "amap" else baidu_address)(payload, identity, lat, lon)
+                        body = (nominatim if provider == "amap" else baidu_address)(payload, 0, lat, lon)
                 except AdapterError as exc:
                     error = exc
             if body is None:
                 payload = self.osm(lat, lon, language, deadline)
                 require_outside_mainland(payload, error)
-                body = osm_address(payload, identity, lat, lon)
+                body = osm_address(payload, 0, lat, lon)
         remaining(deadline)
+        body = self.template(body, row, policy)
         with self.connect(deadline) as db:
-            self.cache_result(db, body, language, policy)
-        return body
+            self.cache_result(db, row, body, language, policy)
+            remaining(deadline)
+        remaining(deadline)
+        return self.response(body, row)
 
-    def cache_result(self, db, body, language, policy):
+    def cache_result(self, db, row, body, language, policy):
         db.execute("INSERT OR REPLACE INTO cache VALUES(?,?,?,?,?)", (
-            -body["osm_id"], language, policy, time.time() + self.ttl, json.dumps(body, ensure_ascii=False),
+            self.cache_key(row, language, policy), language, policy, time.time() + self.ttl, json.dumps(body, ensure_ascii=False),
         ))
-        source = body.get("upstream", {})
-        if source.get("provider") == "osm":
-            db.execute("UPDATE identities SET source_osm_type=?, source_osm_id=? WHERE id=?", (
-                source["osm_type"], source["osm_id"], -body["osm_id"],
-            ))
-            if policy.startswith("auto:"):
-                db.execute("UPDATE identities SET outside_mainland=1 WHERE id=?", (-body["osm_id"],))
 
     def osm(self, lat, lon, language, deadline, osm_ids=None):
         if not self.user_agent:
@@ -542,7 +636,13 @@ class Adapter:
                 except BlockingIOError:
                     time.sleep(min(0.05, remaining(deadline)))
             try:
-                completed = float(lock.read() or "0")
+                try:
+                    completed = float(lock.read() or "0")
+                except ValueError:
+                    raise AdapterError(503, "Invalid rate limit state") from None
+                if not math.isfinite(completed):
+                    raise AdapterError(503, "Invalid rate limit state")
+                completed = max(completed, self._osm_started)
                 wait = max(0, completed + 1 - time.time())
                 if wait >= remaining(deadline):
                     raise AdapterError(504, "Lookup request timed out")
@@ -561,7 +661,7 @@ class Adapter:
 
 
 class Handler(BaseHTTPRequestHandler):
-    server_version = "AMapAdapter"
+    server_version = "GeoRelayAdapter"
     sys_version = ""
 
     def setup(self):
@@ -584,39 +684,71 @@ class Handler(BaseHTTPRequestHandler):
         if self.command != "HEAD":
             self.wfile.write(encoded)
 
-    def do_GET(self):
+    def target(self):
+        if len(self.path) > 4096:
+            raise AdapterError(414, "Request is too long")
+        url = urllib.parse.urlsplit(self.path)
+        if url.path in {"/reverse", "/lookup"}:
+            raise AdapterError(409, "Application-owned protocol required")
+        if url.scheme or url.netloc or url.fragment or url.query:
+            raise AdapterError(400, "Invalid request target")
+        return url.path
+
+    def handle_request(self, post=False):
         try:
-            if len(self.path) > 4096:
-                raise AdapterError(414, "Request is too long")
-            url = urllib.parse.urlsplit(self.path)
-            if url.scheme or url.netloc or url.fragment:
-                raise AdapterError(400, "Invalid request target")
-            params = urllib.parse.parse_qs(url.query, keep_blank_values=True, max_num_fields=20)
-            if any(len(values) != 1 for values in params.values()):
-                raise AdapterError(400, "Duplicate query parameter")
-            params = {key: values[0] for key, values in params.items()}
-            language = self.headers.get("Accept-Language", "").strip().lower()
-            if len(language) > 128 or any(ord(char) < 32 or ord(char) > 126 for char in language):
-                raise AdapterError(400, "Invalid language header")
-            if params.get("format", "jsonv2") not in {"json", "jsonv2"}:
-                raise AdapterError(400, "Unsupported response format")
-            if url.path == "/health":
+            endpoint = self.target()
+            if not post:
+                if endpoint in {"/reverse", "/lookup", "/v1/reverse", "/v1/lookup"}:
+                    raise AdapterError(409, "Application-owned protocol required")
+                if endpoint != "/health":
+                    raise AdapterError(404, "Endpoint not found")
                 body = self.server.adapter.health()
-            elif url.path == "/reverse":
-                body = self.server.adapter.reverse(params.get("lat"), params.get("lon"), language, params.get("provider"))
-            elif url.path == "/lookup":
-                if "osm_ids" not in params:
-                    raise AdapterError(400, "Missing identities")
-                body = self.server.adapter.lookup(params["osm_ids"], language, params.get("provider"))
             else:
-                raise AdapterError(404, "Endpoint not found")
+                if endpoint in {"/reverse", "/lookup"}:
+                    raise AdapterError(409, "Application-owned protocol required")
+                if endpoint not in {"/v1/reverse", "/v1/lookup"}:
+                    raise AdapterError(404, "Endpoint not found")
+                if self.headers.get("Transfer-Encoding") is not None:
+                    raise AdapterError(400, "Unsupported request encoding")
+                lengths = self.headers.get_all("Content-Length", [])
+                if len(lengths) != 1 or not re.fullmatch(r"[0-9]{1,9}", lengths[0]):
+                    raise AdapterError(400, "Invalid content length")
+                length = int(lengths[0])
+                if length == 0:
+                    raise AdapterError(400, "Empty request body")
+                if length > MAX_REQUEST_BODY:
+                    raise AdapterError(413, "Request body is too large")
+                content_types = self.headers.get_all("Content-Type", [])
+                if len(content_types) != 1 or content_types[0].split(";", 1)[0].strip().lower() != "application/json":
+                    raise AdapterError(415, "JSON content type required")
+                raw = self.rfile.read(length)
+                if len(raw) != length:
+                    raise AdapterError(400, "Incomplete request body")
+                try:
+                    document = json.loads(raw.decode("utf-8"), object_pairs_hook=unique_object,
+                                          parse_constant=lambda _: (_ for _ in ()).throw(ValueError()))
+                except (UnicodeError, ValueError, RecursionError):
+                    raise AdapterError(400, "Invalid JSON request") from None
+                value, language, provider = request_document(document, endpoint)
+                function = self.server.adapter.reverse if endpoint == "/v1/reverse" else self.server.adapter.lookup
+                body = function(value, language, provider)
             self.respond(200, body)
         except AdapterError as exc:
             self.respond(exc.status, {"error": str(exc)})
-        except ValueError:
-            self.respond(400, {"error": "Invalid request"})
         except sqlite3.Error:
             self.respond(503, {"error": "Local storage unavailable"})
+        except (ValueError, TypeError):
+            self.respond(400, {"error": "Invalid request"})
+        except TimeoutError:
+            self.respond(408, {"error": "Request body timed out"})
+        except Exception:
+            self.respond(500, {"error": "Request failed"})
+
+    def do_GET(self):
+        self.handle_request()
+
+    def do_POST(self):
+        self.handle_request(post=True)
 
 
 class Server(ThreadingHTTPServer):
@@ -655,11 +787,15 @@ def main():
     parser.add_argument("--backup", metavar="DEST")
     args = parser.parse_args()
     os.umask(0o077)
-    path = os.environ.get("ADAPTER_DB", "/data/adapter.sqlite3")
+    if "ADAPTER_DB" in os.environ:
+        raise ValueError("Legacy ADAPTER_DB must be archived; configure ADAPTER_CACHE_DB")
+    path = os.environ.get("ADAPTER_CACHE_DB", "/data/cache.sqlite3")
     if args.backup:
         # Refuse overwrite and source creation: a typo must not create a fake backup.
         with contextlib.closing(sqlite3.connect(Path(path).resolve().as_uri() + "?mode=ro", uri=True)) as source:
-            source.execute("SELECT id FROM identities LIMIT 1").fetchone()
+            if not require_cache_schema(source):
+                raise ValueError("Cache database is missing")
+            source.execute("SELECT cache_key FROM cache LIMIT 1").fetchone()
             with open(args.backup, "xb"):
                 pass
             with contextlib.closing(sqlite3.connect(args.backup)) as destination:

@@ -32,10 +32,9 @@ def command(*args, input=None):
 
 
 def github(method, path, payload=None):
-    args = ["gh", "api", "--method", method, path]
-    if payload is not None:
-        args += ["--input", "-"]
-    return json.loads(command(*args, input=None if payload is None else json.dumps(payload)))
+    # Share bounded native-token API semantics, notably explicit 404 vs permission failure.
+    from record_release import github as request
+    return request(method, path, payload)
 
 
 def sha(value):
@@ -44,7 +43,7 @@ def sha(value):
     return value
 
 
-def update_release(repository, pin, source, api=github, run=command, detect=check_release):
+def update_release(repository, pin, source, api=github, run=command, detect=check_release, record_verify=None, repair_verify=None):
     if not re.fullmatch(r"[A-Za-z0-9_.-]+/[A-Za-z0-9_.-]+", repository):
         raise UpdateError("Invalid GitHub repository")
     sha(source)
@@ -145,24 +144,85 @@ def update_release(repository, pin, source, api=github, run=command, detect=chec
     if not isinstance(runs, list) or len(runs) >= 100:
         raise UpdateError("Cannot establish publication run history")
     started = False
+    repair_status = None
+    # Check all pending runs first so old failures cannot schedule parallel repairs.
     for item in runs:
         if item["headSha"] != revision:
             raise UpdateError("Run history returned a different source commit")
         if item["status"] in ("queued", "requested", "waiting", "pending", "in_progress"):
-            started = True
-        elif item["status"] == "completed" and item["conclusion"] == "success":
-            jobs = api("GET", root + "/actions/runs/" + str(item["databaseId"]) + "/jobs?per_page=100")
-            if jobs["total_count"] > 100:
+            pending = api("GET", root + "/actions/runs/" + str(item["databaseId"]))
+            expected_title = "images/workflow_dispatch/" + number + "/" + revision + "/publish/-"
+            if pending.get("display_title") == expected_title:
+                started = True
+    for item in ([] if started else runs):
+        if item["headSha"] != revision:
+            raise UpdateError("Run history returned a different source commit")
+        if item["status"] in ("queued", "requested", "waiting", "pending", "in_progress"):
+            continue  # An active check-only dispatch does not suppress publication.
+        elif item["status"] == "completed":
+            original_id = int(item["databaseId"])
+            original = api("GET", root + "/actions/runs/" + str(original_id))
+            attempt = original["run_attempt"]
+            if type(attempt) is not int or attempt < 1:
+                raise UpdateError("Invalid original publication attempt")
+            jobs = api("GET", root + "/actions/runs/" + str(original_id) + "/attempts/" + str(attempt) + "/jobs?per_page=100")
+            if jobs["total_count"] != len(jobs["jobs"]) or len(jobs["jobs"]) > 100:
                 raise UpdateError("Cannot establish publication job history")
-            # A manual publish=false run must not prevent actual publication.
-            started |= any(job["name"] == "publish" and job["conclusion"] == "success" for job in jobs["jobs"])
-        elif item["status"] != "completed":
+            selected = {}
+            for job in jobs["jobs"]:
+                if job["name"] in selected:
+                    raise UpdateError("Duplicate publication job")
+                selected[job["name"]] = job
+            publisher = selected.get("publish", {})
+            if publisher.get("conclusion") not in {"success", "failure"}:
+                continue  # A publish=false or early failed build is not a publication.
+            if any(selected.get(name, {}).get("conclusion") != "success"
+                   for name in ("checks", "build-amd64", "build-arm64", "verify")):
+                continue
+            version = proposed["tag"] + "-georelay-beta-" + revision
+            from record_release import APIError, verify_record, repair_proof
+            if (item["conclusion"] == "success" and selected.get("release-record", {}).get("conclusion") == "success"):
+                try:
+                    (record_verify or verify_record)(repository, original_id, attempt, revision, version, api=api)
+                except APIError as error:
+                    if error.status != 404:
+                        raise  # Unknown/permission failures are never an absent Release.
+                else:
+                    started = True
+                    break
+            # Once fixed publication may exist, repair its record rather than rebuild.
+            # Receipt/registry evidence is validated by trusted main in the repair job.
+            history = api("GET", root + "/actions/workflows/release-only.yml/runs?event=workflow_dispatch&branch=main&per_page=100")
+            if history["total_count"] != len(history["workflow_runs"]) or len(history["workflow_runs"]) >= 100:
+                raise UpdateError("Cannot establish release repair history")
+            title = "release-record/" + "/".join(map(str, (original_id, attempt, revision, version)))
+            matching = [repair for repair in history["workflow_runs"] if repair.get("display_title") == title]
+            if any(repair.get("status") in {"queued", "requested", "waiting", "pending", "in_progress"} for repair in matching):
+                started, repair_status = True, "repair_pending"
+                break
+            successes = [repair for repair in matching if repair.get("status") == "completed" and repair.get("conclusion") == "success"]
+            if successes:
+                repair_id = max(repair["id"] for repair in successes)
+                (repair_verify or repair_proof)(repository, original_id, attempt, revision, version, repair_id, api=api)
+                # Explicit re-evaluation also covers bot repairs with no workflow_run event.
+                api("POST", root + "/actions/workflows/beta-control.yml/dispatches", {
+                    "ref": "main", "inputs": {"original_run_id": str(original_id), "original_attempt": str(attempt), "repair_run_id": str(repair_id)},
+                })
+                started, repair_status = True, "repaired_reevaluation_requested"
+            else:
+                api("POST", root + "/actions/workflows/release-only.yml/dispatches", {
+                    "ref": "main", "inputs": {"original_run_id": str(original_id), "original_attempt": str(attempt),
+                                                 "original_source": revision, "original_version": version},
+                })
+                started, repair_status = True, "repair_dispatched"
+            break
+        else:
             raise UpdateError("Unknown workflow run status")
     if not started:
         run("gh", "workflow", "run", "ci.yml", "--repo", repository, "--ref", branch,
             "-f", "publish=true", "-f", "source_pr=" + number)
     report.update({
-        "status": "already_started" if started else "dispatched",
+        "status": repair_status or ("already_started" if started else "dispatched"),
         "branch": branch, "source_main": source, "source_commit": revision, "pull_request": pull["html_url"],
         "next_step": "CI tests both architectures before publishing beta. The trusted controller may merge a still-current PR, then dispatch main for checked formal images/latest. No running services are deployed.",
     })

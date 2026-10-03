@@ -19,6 +19,9 @@ Modification dates / 修改日期：
 - 2026-10-03: Explicit address refresh also updates place name, road, house number and raw address fields while preserving identity and coordinates. `NOMINATIM_LOCAL_IDENTITIES_ONLY=true` skips historical positive identities during refresh; the default `false` retains the upstream reverse fallback. Local lookup refreshes mainland batches with bounded concurrency.
 - 2026-10-03: Restricted upstream integration to the address URL and refresh patches. Removed the GeoRelay UI, translation and icon modifications and the upstream legal/visual snapshot gates. The application keeps TeslaMate branding and its original legal files and Dockerfile; GeoRelay remains the repository, image and independent adapter name. Exact source pinning, strict address patch application and address/build tests remain in place.
 
+- 2026-10-03: Moved permanent local address identities, exact WGS84 coordinates and verified provider provenance into TeslaMate/PostgreSQL. Added versioned requests, disposable adapter caches, explicit fresh/legacy initialization and audited import. Historical IDs and drive/charge associations are preserved; image-only downgrade is insufficient after new IDs are allocated.
+- 2026-10-03: Added exact-source GitHub Release records for verified image pairs, upstream version change notes and release-only repair, with isolated trusted-main writing and completion gates.
+
 Corresponding Source: https://github.com/srcheng17/georelay. The image's `org.opencontainers.image.revision` identifies the exact commit: open `https://github.com/srcheng17/georelay/tree/<revision>`. That commit's `upstream.json`, `patches/`, `adapter/` and build scripts provide the fixed official source revision and changes needed to rebuild this version. The `org.opencontainers.image.source` label links to the source repository.
 
 向其他使用者提供修改版本时，同时提供该版本对应源码的访问方式。公开镜像同时提供对应源码 commit；构建与发布不执行生产部署。

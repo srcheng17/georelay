@@ -13,6 +13,13 @@ if [[ ! $wait_seconds =~ ^[1-9][0-9]{0,2}$ ]] || (( wait_seconds > 600 )); then
   exit 2
 fi
 
+identity_scenario=${MAIN_IMAGE_IDENTITY_SCENARIO:-fresh}
+case "$identity_scenario" in
+  fresh) runtime_check=runtime_locations.exs; runtime_marker=GEORELAY_RUNTIME_LOCATIONS_OK ;;
+  legacy) runtime_check=runtime_legacy_locations.exs; runtime_marker=GEORELAY_RUNTIME_LEGACY_OK ;;
+  *) echo "MAIN_IMAGE_IDENTITY_SCENARIO must be fresh or legacy" >&2; exit 2 ;;
+esac
+
 # Keep Docker outside command substitution so Bash can interrupt wait immediately.
 command_output=$(mktemp)
 command_timeout=20
@@ -99,8 +106,9 @@ docker_command run --detach --pull=never --name "$name-app" --network "$name" --
   --env DATABASE_HOST=db --env DATABASE_USER=postgres --env DATABASE_PASS=isolated-test-only \
   --env DATABASE_NAME=georelay_smoke --env DISABLE_MQTT=true \
   --env HTTP_BINDING_ADDRESS=0.0.0.0 --env ENCRYPTION_KEY=isolated-smoke-test-only \
-  --env NOMINATIM_BASE_URL=http://stub:8080 --env NOMINATIM_LOCAL_IDENTITIES_ONLY=true \
-  --mount "type=bind,src=$script_directory/runtime_locations.exs,dst=/checks/runtime_locations.exs,readonly" \
+  --env NOMINATIM_BASE_URL=http://stub:8080 --env GEORELAY_ADDRESS_MODE=application \
+  --mount "type=bind,src=$script_directory/$runtime_check,dst=/checks/runtime_locations.exs,readonly" \
+  --mount "type=bind,src=$script_directory/runtime_legacy_identities.json,dst=/checks/runtime_legacy_identities.json,readonly" \
   "$1" >/dev/null || fail "application start"
 
 probe='
@@ -157,6 +165,6 @@ migration_count=${BASH_REMATCH[1]}
 require_running
 docker_command exec "$name-app" bin/teslamate rpc 'Code.eval_file("/checks/runtime_locations.exs"); :ok' \
   || fail "compiled address RPC failed"
-[[ $'\n'$docker_output$'\n' == *$'\nGEORELAY_RUNTIME_LOCATIONS_OK\n'* ]] || fail "compiled address RPC success marker missing"
+[[ $'\n'$docker_output$'\n' == *$'\n'"$runtime_marker"$'\n'* ]] || fail "compiled address RPC success marker missing"
 require_running
 exit 0

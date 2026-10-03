@@ -11,7 +11,7 @@ services:
       AMAP_API_REGION: "${AMAP_API_REGION:-mainland}"
       AMAP_KEY: "${AMAP_KEY:-}"
       NOMINATIM_USER_AGENT: "${NOMINATIM_USER_AGENT:-}"
-      ADAPTER_DB: /data/adapter.sqlite3
+      ADAPTER_CACHE_DB: /data/cache.sqlite3
       CACHE_TTL_SECONDS: "86400"
       UPSTREAM_TIMEOUT_SECONDS: "8"
       LOOKUP_TIMEOUT_SECONDS: "20"
@@ -29,7 +29,7 @@ services:
     restart: unless-stopped
     # 不映射 host ports；补丁版 TeslaMate 需接入此网络并设置：
     # NOMINATIM_BASE_URL=http://georelay-adapter:8080
-    # NOMINATIM_LOCAL_IDENTITIES_ONLY=true
+    # GEORELAY_ADDRESS_MODE=application
 
 volumes:
   amap-data:

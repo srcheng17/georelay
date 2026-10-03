@@ -65,6 +65,14 @@ class BarkTests(unittest.TestCase):
             self.assertEqual(captured[0]["idempotency_key"], "georelay/fixture/georelay/10/1/beta_validation")
             self.assertNotIn("fixture-device-key", json.dumps(result))
 
+    def test_release_record_stage_and_job_use_existing_loopback_notification(self):
+        report = json.loads(json.dumps(REPORT))
+        report["notification"].update(stage="release_record", failed_jobs=["release-record"])
+        with receiver([(200, b'{"code":200}', {})]) as (url, captured):
+            self.assertEqual(bark.send(report, url, allow_local_http=True)["status"], "sent")
+            self.assertIn("release-record", captured[0]["body"])
+            self.assertEqual(len(captured), 1)
+
     def test_missing_secret_and_structural_url_rejection(self):
         self.assertEqual(bark.send(REPORT, "")["status"], "not_configured")
         for url in ("http://example.invalid/key", "https://user:pass@example.invalid/key", "https://example.invalid/#key",

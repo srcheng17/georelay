@@ -126,8 +126,35 @@ if [[ -n ${GITHUB_STEP_SUMMARY:-} ]]; then
   printf 'Published checked linux/amd64 and linux/arm64 images:\n\n- `%s:%s`\n- `%s:%s`\n\nNo deployment performed.\n' "$app_package" "$version" "$adapter_package" "$version" >> "$GITHUB_STEP_SUMMARY"
 fi
 
+# Save verified fixed facts before any alias work, including failures/early returns.
+receipt_path=${PUBLICATION_RECEIPT:-$manifest_dir/publication-receipt.json}
+write_receipt() {
+  python3 - "$root" "$context" "$manifest_dir" "$receipt_path" "$1" "$2" "$3" <<'PYCODE'
+import json, os, sys
+from pathlib import Path
+sys.path.insert(0, str(Path(sys.argv[1]) / "scripts"))
+from image_context import publication_receipt
+metadata = Path(sys.argv[3])
+digests = {p: json.loads((metadata / (p + ".metadata.json")).read_text())["containerimage.descriptor"]["digest"] for p in ("georelay", "georelay-adapter")}
+receipt = publication_receipt(json.loads(sys.argv[2]), json.loads(Path("upstream.json").read_text()), digests,
+    dict(status=sys.argv[5], reason=sys.argv[6], tag=sys.argv[7]), int(os.environ.get("GITHUB_RUN_ID", "1")), int(os.environ.get("GITHUB_RUN_ATTEMPT", "1")))
+path = Path(sys.argv[4])
+path.parent.mkdir(parents=True, exist_ok=True)
+temporary = path.with_suffix(".tmp")
+temporary.write_text(json.dumps(receipt, sort_keys=True) + "\n")
+os.replace(temporary, path)
+PYCODE
+}
+floating_tag=latest
+if [[ $channel == beta ]]; then
+  floating_tag=
+  if [[ -n $pr_number ]]; then floating_tag="beta-pr-$pr_number"; fi
+fi
+write_receipt failed promotion_incomplete "$floating_tag"
+
 # Fixed versions survive source drift; only a current main/PR may update a floating tag.
 if [[ $channel == beta && -z $pr_number ]]; then
+  write_receipt skipped no_pr ""
   echo "Beta version images published; no linked PR alias requested."
   exit 0
 fi
@@ -144,6 +171,7 @@ current_sha=$(git rev-parse origin/publication-source)
 skip_reason=
 if [[ $current_sha != "$source_sha" ]]; then
   skip_reason="the publication source branch has changed"
+  receipt_reason=stale_source
 elif [[ $channel == beta ]]; then
   pr_status=$(GH_TOKEN="$GHCR_TOKEN" python3 - "$root" "$GITHUB_REPOSITORY" "$pr_number" "$source_sha" "$source_ref" <<'PYCODE'
 from pathlib import Path
@@ -167,9 +195,11 @@ PYCODE
 )
   if [[ $pr_status != current ]]; then
     skip_reason="the linked PR is no longer a current open candidate"
+    receipt_reason=stale_pr
   fi
 fi
 if [[ -n $skip_reason ]]; then
+  write_receipt skipped "$receipt_reason" "$floating_tag"
   echo "Version images published; floating tag promotion skipped because $skip_reason."
   if [[ -n ${GITHUB_STEP_SUMMARY:-} ]]; then
     printf '\nFloating tag promotion skipped: %s.\n' "$skip_reason" >> "$GITHUB_STEP_SUMMARY"
@@ -188,6 +218,7 @@ for package in "$app_package" "$adapter_package"; do
   docker buildx imagetools inspect --raw "$package:$floating_tag" > "$raw_index"
   verify_index "$raw_index" "$digest"
 done
+write_receipt promoted verified "$floating_tag"
 if [[ -n ${GITHUB_STEP_SUMMARY:-} ]]; then
   printf '\nBoth %s tags verified against the checked version indexes.\n' "$floating_tag" >> "$GITHUB_STEP_SUMMARY"
 fi

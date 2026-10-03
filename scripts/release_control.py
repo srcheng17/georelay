@@ -16,7 +16,7 @@ from retain_images import INDEX_TYPES, IMAGE_TYPES, descriptor, registry_token, 
 from update_release import command, sha
 
 
-JOBS = {"checks", "build-amd64", "build-arm64", "verify", "publish"}
+JOBS = {"checks", "build-amd64", "build-arm64", "verify", "publish", "release-record"}
 RUN_TITLE = re.compile(r"images/(pull_request|push|workflow_dispatch)/(0|[1-9]\d*)/([0-9a-f]{40})/(publish|check)/(-|[0-9a-f]{40})")
 TAG = re.compile(r"v(?:0|[1-9]\d*)\.(?:0|[1-9]\d*)\.(?:0|[1-9]\d*)")
 
@@ -87,10 +87,11 @@ def main_failure(event, environment, needs, api=github):
     report = {"status": "skipped", "reason": "no_main_publication_failure", "notify": False}
     if ((event_name != "push" and inputs.get("publish") not in (True, "true"))
             or needs["checks"].get("outputs", {}).get("image_required") == "false"
-            or (needs["verify"]["result"] == "success" and needs["publish"]["result"] == "success")):
+            or (needs["verify"]["result"] == "success" and needs["publish"]["result"] == "success"
+                and needs.get("release-record", {}).get("result") == "success")):
         return report
-    failed_jobs = sorted(name for name in ("checks", "verify", "publish")
-                         if needs[name]["result"] in {"failure", "cancelled"})
+    failed_jobs = sorted(name for name in ("checks", "verify", "publish", "release-record")
+                         if needs.get(name, {}).get("result") in {"failure", "cancelled"})
     notice = {"repository": repository, "run_id": run_id, "attempt": attempt, "source_pr": 0,
               "sha": revision, "run_url": "https://github.com/" + repository + "/actions/runs/" + str(run_id),
               "stage": "main_publication", "failed_jobs": failed_jobs,
@@ -112,7 +113,7 @@ def main_failure(event, environment, needs, api=github):
     return dict(report, status="failed", reason="main_publication", notify=True, notification=notice)
 
 
-def control(repository, run_id, attempt, api=github, fetch=registry_document, apply=False, sleep=time.sleep):
+def control(repository, run_id, attempt, api=github, fetch=registry_document, apply=False, sleep=time.sleep, repair_run_id=None, record_verify=None, repair_verify=None):
     """Read-only by default. Only a fully checked, current beta can mutate GitHub."""
     if (not re.fullmatch(r"[A-Za-z0-9_.-]+/[A-Za-z0-9_.-]+", repository) or type(run_id) is not int or run_id < 1
             or type(attempt) is not int or attempt < 1):
@@ -122,7 +123,7 @@ def control(repository, run_id, attempt, api=github, fetch=registry_document, ap
     notice = None
     stage = "source_verification"
     try:
-        run = api("GET", root + "/actions/runs/" + str(run_id))
+        run = api("GET", root + "/actions/runs/" + str(run_id) + "/attempts/" + str(attempt))
         workflow = api("GET", root + "/actions/workflows/ci.yml")
         title = RUN_TITLE.fullmatch(run.get("display_title", ""))
         if (run.get("id") != run_id or run.get("run_attempt") != attempt or run.get("status") != "completed"
@@ -159,7 +160,7 @@ def control(repository, run_id, attempt, api=github, fetch=registry_document, ap
         stage = "beta_validation"
         data = None
         try:
-            data = api("GET", root + "/actions/runs/" + str(run_id) + "/jobs?filter=latest&per_page=100")
+            data = api("GET", root + "/actions/runs/" + str(run_id) + "/attempts/" + str(attempt) + "/jobs?per_page=100")
             for job in data["jobs"]:
                 if job.get("name") == "checks" and job.get("run_id") == run_id and any(
                     step.get("name") == "Python checks for metadata-only changes" and step.get("status") == "completed"
@@ -169,11 +170,11 @@ def control(repository, run_id, attempt, api=github, fetch=registry_document, ap
                     return dict(report, reason="metadata_only_run")
         except (OSError, RuntimeError, ValueError, KeyError, TypeError, AttributeError, subprocess.SubprocessError):
             data = None  # Early image failures can have no jobs/artifacts; still notify.
-        if run.get("conclusion") in {"failure", "cancelled", "timed_out", "action_required", "startup_failure"}:
+        if run.get("conclusion") in {"failure", "cancelled", "timed_out", "action_required", "startup_failure"} and repair_run_id is None:
             if data is not None:
                 notice["failed_jobs"] = sorted({job["name"] for job in data["jobs"] if job.get("name") in JOBS and job.get("conclusion") in {"failure", "cancelled", "timed_out"}})
             return dict(report, status="failed", reason=stage, notify=True, notification=dict(notice, stage=stage))
-        if run.get("conclusion") != "success":
+        if run.get("conclusion") != "success" and repair_run_id is None:
             return report
         if pull_number == 0:
             return dict(report, reason="no_candidate_merge")
@@ -189,7 +190,8 @@ def control(repository, run_id, attempt, api=github, fetch=registry_document, ap
         selected = {}
         for job in jobs:
             name = job.get("name")
-            if job.get("run_id") != run_id or job.get("status") != "completed" or job.get("conclusion") != "success":
+            repaired_gate = repair_run_id is not None and name == "release-record" and job.get("conclusion") in {"failure", "cancelled"}
+            if job.get("run_id") != run_id or job.get("status") != "completed" or (job.get("conclusion") != "success" and not repaired_gate):
                 raise ValueError("Candidate job did not succeed")
             if name in JOBS:
                 if name in selected:
@@ -217,6 +219,12 @@ def control(repository, run_id, attempt, api=github, fetch=registry_document, ap
         sha(pin["commit"])
         version = pin["tag"] + "-georelay-beta-" + revision
         verify_beta(repository, revision, version, fetch)
+        stage = "release_record"
+        from record_release import verify_record, repair_proof
+        if repair_run_id is not None:
+            (repair_verify or repair_proof)(repository, run_id, attempt, revision, version, repair_run_id, api=api, fetch=fetch)
+        else:
+            (record_verify or verify_record)(repository, run_id, attempt, revision, version, api=api, fetch=fetch)
 
         def current_candidate():
             current = api("GET", root + "/pulls/" + str(pull_number))
@@ -301,11 +309,19 @@ def main():
             report = main_failure(event, os.environ, json.loads(os.environ["WORKFLOW_NEEDS"]), api=github)
         else:
             repository = os.environ["GITHUB_REPOSITORY"]
-            if (os.environ.get("GITHUB_EVENT_NAME") != "workflow_run" or os.environ.get("GITHUB_REF") != "refs/heads/main"
+            if (os.environ.get("GITHUB_EVENT_NAME") not in {"workflow_run", "workflow_dispatch"} or os.environ.get("GITHUB_REF") != "refs/heads/main"
                     or event["repository"]["full_name"] != repository):
                 raise ValueError("Controller must run from trusted main")
-            run = event["workflow_run"]
-            report = control(repository, run["id"], run["run_attempt"], apply=args.apply)
+            if os.environ["GITHUB_EVENT_NAME"] == "workflow_dispatch":
+                inputs = event["inputs"]
+                identifiers = [inputs[key] for key in ("original_run_id", "original_attempt", "repair_run_id")]
+                if any(not isinstance(value, str) or not re.fullmatch(r"[1-9][0-9]*", value) for value in identifiers):
+                    raise ValueError("Invalid repair reevaluation input")
+                run_id, attempt, repair_id = map(int, identifiers)
+                report = control(repository, run_id, attempt, apply=args.apply, repair_run_id=repair_id)
+            else:
+                run = event["workflow_run"]
+                report = control(repository, run["id"], run["run_attempt"], apply=args.apply)
     except (OSError, ValueError, KeyError, TypeError, AttributeError):
         report = {"status": "failed", "reason": "invalid_main_failure_context" if args.main_failure else "invalid_controller_context", "notify": False}
     args.output.write_text(json.dumps(report, indent=2) + "\n", encoding="utf-8")

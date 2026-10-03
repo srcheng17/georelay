@@ -1,0 +1,5 @@
+{"file": ".trellis/spec/backend/index.md", "reason": "Standard-library scripts, minimal scope and no production operations."}
+{"file": ".trellis/spec/backend/quality-guidelines.md", "reason": "Exact immutable versions, dual-architecture publication, trusted controller and failure notification contracts."}
+{"file": ".trellis/spec/guides/cross-layer-thinking-guide.md", "reason": "Trace publication, recording, readiness, repair and failure across jobs."}
+{"file": ".trellis/tasks/10-03-image-release-notes/research/release-records.md", "reason": "Current source and official GitHub evidence, native token uncertainty, bootstrap and focused validation matrix."}
+{"file": ".trellis/tasks/10-03-image-release-notes/research/planning-review.md", "reason": "Resolved independent planning review: repair readiness, receipt persistence, fixed baseline, token permissions and bot observer gaps."}

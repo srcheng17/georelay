@@ -9,6 +9,8 @@ permissions:
   contents: write
   pull-requests: write
   actions: write
+  checks: read
+  packages: read
 
 concurrency:
   group: upstream-release

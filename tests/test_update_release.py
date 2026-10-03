@@ -37,6 +37,8 @@ class GitHubFixture:
         self.calls = []
         self.commands = []
         self.main = MAIN
+        self.recorded = True
+        self.repairs = []
 
     def detect(self, pin):
         responses = {
@@ -84,8 +86,17 @@ class GitHubFixture:
                 "base": {"ref": "main"}, "html_url": "https://github.com/fixture/teslamate/pull/1",
             }
             return self.pull
-        if path == "/actions/runs/1/jobs?per_page=100":
-            return {"total_count": 1, "jobs": [{"name": "publish", "conclusion": "success" if self.published else "skipped"}]}
+        if path == "/actions/runs/1":
+            return {"run_attempt": 1, "display_title": "images/workflow_dispatch/1/" + BRANCH + "/publish/-"}
+        if path == "/actions/runs/1/attempts/1/jobs?per_page=100":
+            jobs = [{"name": name, "conclusion": "success"} for name in ("checks", "build-amd64", "build-arm64", "verify")]
+            jobs.append({"name": "publish", "conclusion": "success" if self.published else "skipped"})
+            jobs.append({"name": "release-record", "conclusion": "success" if self.recorded else "failure"})
+            return {"total_count": len(jobs), "jobs": jobs}
+        if path == "/actions/workflows/release-only.yml/runs?event=workflow_dispatch&branch=main&per_page=100":
+            return dict(total_count=len(self.repairs), workflow_runs=self.repairs)
+        if method == "POST" and path in {"/actions/workflows/release-only.yml/dispatches", "/actions/workflows/beta-control.yml/dispatches"}:
+            return None
         raise AssertionError((method, path))
 
     def run(self, *args):
@@ -104,7 +115,8 @@ class GitHubFixture:
         raise AssertionError(args)
 
     def update(self):
-        return updater.update_release(REPOSITORY, PIN, MAIN, api=self.api, run=self.run, detect=self.detect)
+        return updater.update_release(REPOSITORY, PIN, MAIN, api=self.api, run=self.run, detect=self.detect,
+                                      record_verify=lambda *args, **kwargs: None, repair_verify=lambda *args, **kwargs: None)
 
     def dispatches(self):
         return [args for args in self.commands if args[:3] == ("gh", "workflow", "run")]
@@ -150,6 +162,31 @@ class UpdateReleaseTests(unittest.TestCase):
                 self.assertEqual(fixture.update()["status"], "already_started")
                 self.assertFalse(any(method != "GET" for method, _, _ in fixture.calls))
                 self.assertEqual(fixture.dispatches(), [])
+
+    def test_record_failure_repairs_without_rebuilding_and_rechecks_without_observer(self):
+        fixture = GitHubFixture()
+        fixture.update()
+        fixture.recorded = False
+        fixture.runs = [{"databaseId": 1, "headSha": BRANCH, "status": "completed", "conclusion": "failure"}]
+        fixture.commands.clear()
+        fixture.calls.clear()
+        self.assertEqual(fixture.update()["status"], "repair_dispatched")
+        self.assertEqual(fixture.dispatches(), [])
+        repair_input = next(payload for method, path, payload in fixture.calls if method == "POST")
+        self.assertEqual(repair_input["ref"], "main")
+        self.assertEqual(repair_input["inputs"]["original_attempt"], "1")
+        version = PROPOSED["tag"] + "-georelay-beta-" + BRANCH
+        fixture.repairs = [dict(id=9, display_title="release-record/1/1/" + BRANCH + "/" + version, status="in_progress")]
+        fixture.calls.clear()
+        self.assertEqual(fixture.update()["status"], "repair_pending")
+        self.assertFalse(any(method != "GET" for method, _, _ in fixture.calls))
+        fixture.repairs[0].update(status="completed", conclusion="success")
+        fixture.calls.clear()
+        self.assertEqual(fixture.update()["status"], "repaired_reevaluation_requested")
+        writes = [(path, payload) for method, path, payload in fixture.calls if method == "POST"]
+        self.assertEqual(writes, [("/actions/workflows/beta-control.yml/dispatches", {"ref": "main", "inputs": {
+            "original_run_id": "1", "original_attempt": "1", "repair_run_id": "9"}})])
+        self.assertEqual(fixture.dispatches(), [])
 
     def test_moved_tag_branch_mismatch_main_drift_and_extra_files_stop(self):
         fixture = GitHubFixture()
