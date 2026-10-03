@@ -209,7 +209,7 @@ jobs:
       group: ghcr-publication-${{ github.repository }}
       cancel-in-progress: false
     runs-on: ubuntu-latest
-    timeout-minutes: 15
+    timeout-minutes: 16
     permissions:
       contents: write
       actions: read
