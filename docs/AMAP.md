@@ -191,7 +191,7 @@ sidecar 的缓存 TTL 不会自动更新 PostgreSQL 里的已有地址。应用�
 5. [Beta release control](../.github/workflows/beta-control.yml) 从可信 main 读取 run、PR 与 registry 元数据。两架构/verify/beta 索引成功，PR 同仓且 open/non-draft、head 仍为 tested SHA、main 基线有效且服务器保护允许时，带 expected head SHA 普通 merge。fork、过期或被新提交替代的成功候选只跳过；控制器不执行候选脚本、不自动重写分支、不合并自身首次启用 PR。
 6. 合并回读成功后显式 dispatch main，绑定 expected_main_sha 与 source_pr；GITHUB_TOKEN 合并的 push 本身不会触发新 CI。main 对 merge commit 重新构建/测试，发布正式版本与 latest；推广前回读 current main。main 的镜像相关 push 或 main publish dispatch 也可正式发布，latest 跟随已审阅 main pin，无需等待尚未合入的新官方版本。
 
-成功、轻量检查和 check-only 不发通知。可信镜像构建、测试、合并操作、dispatch 或发布实际失败时发 Bark，含失败阶段、commit 与 PR/run 链接。beta 早期失败没有产物也能通知；合并后的 main 失败不要求 PR 仍 open。fork 和正常过期跳过不通知。
+成功、轻量检查和 check-only 不发通知。可信镜像构建、测试、合并操作、dispatch 或发布实际失败时发 Bark，含失败阶段、commit 与 PR/run 链接。beta 早期失败由可信控制器通知；main CI的独立收尾job直接通知正式失败，覆盖前序失败与发布job超时，避免依赖bot dispatch后未触发的workflow_run。稳定控制器不重复发送main通知。合并后的 main 失败不要求 PR 仍 open；关联API不可读时保留基本run通知。fork 和正常过期跳过不通知。
 
 ### 标签与运行服务更新
 

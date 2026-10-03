@@ -5,8 +5,11 @@ import copy
 import hashlib
 import io
 import json
+import os
 from pathlib import Path
+import re
 import sys
+import tempfile
 import unittest
 from unittest.mock import patch
 
@@ -334,22 +337,21 @@ class ReleaseControlTests(unittest.TestCase):
         fixture.fail = "/actions/runs/10/jobs?filter=latest&per_page=100"
         self.assertTrue(fixture.control()["notify"])
 
-    def test_closed_merged_pr_main_failure_correlates_dispatch_and_stable_success_never_recurses(self):
-        fixture = Fixture()
-        fixture.run.update(event="workflow_dispatch", head_branch="main", head_sha=MERGED, conclusion="failure",
-                           display_title="images/workflow_dispatch/7/" + MERGED + "/publish/" + MERGED)
-        fixture.pull.update(state="closed", merged=True, merge_commit_sha=MERGED)
-        result = fixture.control()
-        self.assertTrue(result["notify"])
-        self.assertEqual(result["reason"], "main_publication")
-        fixture.pull["merge_commit_sha"] = HEAD
-        self.assertFalse(fixture.control()["notify"])
-        fixture.pull["merge_commit_sha"] = MERGED
-        fixture.run["conclusion"] = "success"
-        self.assertFalse(fixture.control()["notify"])
-        self.assertEqual(fixture.writes(), [])
-        fixture.run.update(event="push", display_title="images/push/0/" + MERGED + "/publish/-", conclusion="failure")
-        self.assertTrue(fixture.control()["notify"])
+    def test_main_observer_delegates_all_success_failure_and_stale_paths_before_pr_read(self):
+        for event in ("push", "workflow_dispatch"):
+            for conclusion in ("success", "failure", "cancelled", "timed_out"):
+                fixture = Fixture()
+                title = ("images/push/0/" + MAIN + "/publish/-" if event == "push" else
+                         "images/workflow_dispatch/7/" + MAIN + "/publish/" + MERGED)
+                fixture.run.update(event=event, head_branch="main", head_sha=MAIN,
+                                   conclusion=conclusion, display_title=title)
+                fixture.fail = "/pulls/7"
+                result = fixture.control()
+                self.assertEqual(result["reason"], "main_failure_owned_by_ci")
+                self.assertFalse(result["notify"])
+                self.assertEqual(fixture.writes(), [])
+                self.assertEqual(fixture.fetches, [])
+                self.assertFalse(any("/pulls/" in path or "/jobs?" in path for _, path, _ in fixture.calls))
 
     def test_real_failed_beta_still_notifies_after_pr_closed_draft_or_head_changed(self):
         for change in (lambda p: p.update(state="closed"), lambda p: p.update(draft=True), lambda p: p["head"].update(sha=MAIN)):
@@ -361,19 +363,18 @@ class ReleaseControlTests(unittest.TestCase):
             self.assertEqual(result["reason"], "beta_validation")
             self.assertEqual(fixture.writes(), [])
 
-    def test_failed_stale_main_dispatch_notifies_with_actual_and_expected_commits(self):
-        fixture = Fixture()
-        fixture.run.update(event="workflow_dispatch", head_branch="main", head_sha=MAIN, conclusion="failure",
-                           display_title="images/workflow_dispatch/7/" + MAIN + "/publish/" + MERGED)
-        fixture.pull.update(state="closed", merged=True, merge_commit_sha=MERGED)
-        result = fixture.control()
-        self.assertTrue(result["notify"])
-        self.assertEqual(result["notification"]["sha"], MAIN)
-        self.assertEqual(result["notification"]["expected_main_sha"], MERGED)
-        self.assertEqual(fixture.writes(), [])
-        fixture.run["conclusion"] = "success"
-        self.assertEqual(fixture.control()["reason"], "stale_main_dispatch")
-        self.assertFalse(fixture.control()["notify"])
+    def test_beta_finalizer_success_is_accepted_but_non_success_still_blocks_merge(self):
+        for conclusion in ("success", "failure", "skipped"):
+            fixture = Fixture()
+            fixture.jobs.append({"id": 30, "name": "main-failure-notification", "run_id": 10,
+                                 "status": "completed", "conclusion": conclusion})
+            result = fixture.control()
+            if conclusion == "success":
+                self.assertEqual(result["status"], "merged_dispatched")
+                self.assertEqual(len(fixture.writes()), 2)
+            else:
+                self.assertEqual(result["reason"], "beta_jobs")
+                self.assertEqual(fixture.writes(), [])
 
     def test_no_pr_branch_can_notify_failure_without_auto_merge_and_bad_context_is_secret_safe(self):
         fixture = Fixture()
@@ -387,6 +388,165 @@ class ReleaseControlTests(unittest.TestCase):
         result = fixture.control()
         self.assertFalse(result["notify"])
         self.assertNotIn("private-remote-response", json.dumps(result))
+
+
+class MainFailureTests(unittest.TestCase):
+    def setUp(self):
+        self.fixture = Fixture()
+        self.fixture.pull.update(state="closed", merged=True, merge_commit_sha=MERGED)
+        self.event = {"repository": {"full_name": REPO}, "inputs": {
+            "publish": "true", "source_pr": "7", "expected_main_sha": MERGED,
+        }}
+        self.needs = {"checks": {"result": "success", "outputs": {"image_required": "true"}},
+                      "build": {"result": "success"}, "verify": {"result": "success"},
+                      "publish": {"result": "failure"}}
+        self.environment = {"GITHUB_REPOSITORY": REPO, "GITHUB_REF": "refs/heads/main",
+                            "GITHUB_EVENT_NAME": "workflow_dispatch", "GITHUB_SHA": MERGED,
+                            "GITHUB_RUN_ID": "10", "GITHUB_RUN_ATTEMPT": "1"}
+
+    def report(self):
+        return control.main_failure(self.event, self.environment, self.needs, api=self.fixture.api)
+
+    def test_current_main_failure_reports_actual_run_without_completed_observer_or_writes(self):
+        self.fixture.run["status"] = "in_progress"
+        result = self.report()
+        self.assertEqual(result["reason"], "main_publication")
+        self.assertTrue(result["notify"])
+        notice = result["notification"]
+        self.assertEqual(notice["source_pr"], 7)
+        self.assertEqual(notice["sha"], MERGED)
+        self.assertEqual(notice["expected_main_sha"], MERGED)
+        self.assertEqual(notice["failed_jobs"], ["publish"])
+        self.assertEqual(notice["run_url"], "https://github.com/" + REPO + "/actions/runs/10")
+        self.assertEqual(self.fixture.calls, [("GET", "/pulls/7", None)])
+        self.assertEqual(self.fixture.writes(), [])
+
+    def test_stale_expected_main_falls_back_to_basic_actual_run_and_preserves_expected(self):
+        self.environment["GITHUB_SHA"] = MAIN
+        self.needs["checks"] = {"result": "failure", "outputs": {}}
+        self.needs["build"]["result"] = "skipped"
+        self.needs["verify"]["result"] = "failure"
+        self.needs["publish"]["result"] = "skipped"
+        notice = self.report()["notification"]
+        self.assertEqual(notice["sha"], MAIN)
+        self.assertEqual(notice["expected_main_sha"], MERGED)
+        self.assertEqual(notice["source_pr"], 0)
+        self.assertEqual(notice["failed_jobs"], ["checks", "verify"])
+        self.assertEqual(self.fixture.writes(), [])
+
+    def test_unreadable_or_unrelated_pr_does_not_lose_basic_notification(self):
+        for edit in (lambda f: setattr(f, "fail", "/pulls/7"), lambda f: f.pull.update(number=8),
+                     lambda f: f.pull.update(merged=False), lambda f: f.pull.update(merge_commit_sha=HEAD),
+                     lambda f: f.pull["head"]["repo"].update(full_name="fork/georelay"),
+                     lambda f: f.pull["base"]["repo"].update(full_name="fork/georelay"),
+                     lambda f: f.pull["base"].update(ref="other")):
+            with self.subTest(edit=edit):
+                self.setUp()
+                edit(self.fixture)
+                result = self.report()
+                self.assertTrue(result["notify"])
+                self.assertEqual(result["notification"]["source_pr"], 0)
+                self.assertEqual(result["notification"]["expected_main_sha"], MERGED)
+                self.assertEqual(self.fixture.writes(), [])
+                self.assertNotIn("private-remote-response", json.dumps(result))
+        self.event["inputs"].update(source_pr="untrusted-private-text", expected_main_sha="invalid-private-text")
+        result = self.report()
+        self.assertTrue(result["notify"])
+        self.assertEqual(result["notification"]["source_pr"], 0)
+        self.assertNotIn("expected_main_sha", result["notification"])
+        self.assertNotIn("private-text", json.dumps(result))
+
+    def test_main_push_cancelled_verify_and_build_summary_are_accurate(self):
+        self.environment["GITHUB_EVENT_NAME"] = "push"
+        self.event.pop("inputs")
+        self.needs["build"]["result"] = "cancelled"
+        self.needs["verify"]["result"] = "cancelled"
+        self.needs["publish"]["result"] = "skipped"
+        notice = self.report()["notification"]
+        self.assertEqual(notice["source_pr"], 0)
+        self.assertEqual(notice["failed_jobs"], ["verify"])
+        self.assertEqual(notice["conclusion"], "cancelled")
+        self.assertEqual(self.fixture.calls, [])
+
+    def test_unrequested_metadata_success_and_untrusted_native_context_never_notify(self):
+        for edit in (lambda: self.event["inputs"].update(publish="false"),
+                     lambda: self.needs["checks"]["outputs"].update(image_required="false"),
+                     lambda: self.needs["publish"].update(result="success")):
+            self.setUp()
+            edit()
+            self.assertFalse(self.report()["notify"])
+            self.assertEqual(self.fixture.calls, [])
+        for edit in (lambda: self.environment.update(GITHUB_REF="refs/heads/feature"),
+                     lambda: self.environment.update(GITHUB_EVENT_NAME="pull_request"),
+                     lambda: self.environment.update(GITHUB_SHA="bad-private-text"),
+                     lambda: self.environment.update(GITHUB_RUN_ID="0"),
+                     lambda: self.event["repository"].update(full_name="fork/georelay")):
+            self.setUp()
+            edit()
+            with self.assertRaises(ValueError):
+                self.report()
+            self.assertEqual(self.fixture.calls, [])
+
+    def test_actual_workflow_native_decision_covers_failures_and_excludes_beta_noops(self):
+        workflow = (Path(__file__).resolve().parents[1] / ".github/workflows/ci.yml").read_text()
+        finalizer = workflow.split("  main-failure-notification:\n", 1)[1]
+        expression = re.search(r'run: echo "notify=\$\{\{ (.*?) \}\}"', finalizer).group(1)
+        for ref, event_name, publish, image_required, verify, publication, expected in (
+                ("main", "push", False, "true", "success", "failure", True),
+                ("main", "workflow_dispatch", True, "true", "success", "failure", True),
+                ("main", "workflow_dispatch", True, "", "failure", "skipped", True),
+                ("main", "push", False, "true", "failure", "skipped", True),
+                ("main", "push", False, "true", "cancelled", "skipped", True),
+                ("main", "push", False, "true", "success", "cancelled", True),
+                ("main", "push", False, "false", "failure", "skipped", False),
+                ("main", "workflow_dispatch", False, "true", "failure", "skipped", False),
+                ("main", "push", False, "true", "success", "success", False),
+                ("feature", "pull_request", False, "true", "failure", "skipped", False),
+                ("feature", "workflow_dispatch", True, "true", "success", "failure", False),
+                ("main", "pull_request", False, "true", "failure", "skipped", False)):
+            with self.subTest(ref=ref, event=event_name, verify=verify, publication=publication):
+                values = {"github.ref": "refs/heads/" + ref, "github.event_name": event_name,
+                          "inputs.publish": publish, "needs.checks.outputs.image_required": image_required,
+                          "needs.verify.result": verify, "needs.publish.result": publication}
+                native_condition = expression
+                for key, value in values.items():
+                    native_condition = native_condition.replace(key, repr(value))
+                native_condition = native_condition.replace("&&", "and").replace("||", "or")
+                self.assertEqual(eval(native_condition, {"__builtins__": {}}, {}), expected)
+        self.assertIn("    needs: [checks, build, verify, publish]\n    if: always()", finalizer)
+        self.assertIn("ref: ${{ github.sha }}", finalizer)
+        self.assertEqual(finalizer.count("${{ secrets.BARK_URL }}"), 1)
+        self.assertNotIn("${{ secrets.BARK_URL }}", finalizer.split("      - name: Notify main publication failure through Bark")[0])
+        self.assertIn("BARK_URL: https://notification.invalid/dry-run", finalizer)
+
+    def test_cli_report_mode_is_readonly_successful_step_and_rejects_apply(self):
+        with tempfile.TemporaryDirectory() as directory:
+            event_path = Path(directory) / "event.json"
+            output_path = Path(directory) / "report.json"
+            github_output = Path(directory) / "github-output"
+            event_path.write_text(json.dumps(self.event))
+            environment = dict(self.environment, GITHUB_EVENT_PATH=str(event_path),
+                               GITHUB_OUTPUT=str(github_output), WORKFLOW_NEEDS=json.dumps(self.needs))
+            args = ["release_control.py", "--main-failure", "--output", str(output_path)]
+            with patch.dict(os.environ, environment, clear=True), patch.object(sys, "argv", args), \
+                    patch.object(control, "control") as observer, patch.object(control, "github", self.fixture.api), \
+                    patch("sys.stdout", new_callable=io.StringIO):
+                self.assertEqual(control.main(), 0)
+            observer.assert_not_called()
+            self.assertTrue(json.loads(output_path.read_text())["notify"])
+            self.assertEqual(github_output.read_text(), "notify=true\n")
+            with patch.object(sys, "argv", args + ["--apply"]), patch("sys.stderr", new_callable=io.StringIO), \
+                    patch.object(control, "control") as observer, patch.object(control, "main_failure") as reporter:
+                with self.assertRaises(SystemExit) as error:
+                    control.main()
+                self.assertEqual(error.exception.code, 2)
+            observer.assert_not_called()
+            reporter.assert_not_called()
+            environment["GITHUB_REF"] = "refs/heads/feature"
+            with patch.dict(os.environ, environment, clear=True), patch.object(sys, "argv", args), \
+                    patch("sys.stdout", new_callable=io.StringIO):
+                self.assertEqual(control.main(), 1)
+            self.assertFalse(json.loads(output_path.read_text())["notify"])
 
 
 if __name__ == "__main__":

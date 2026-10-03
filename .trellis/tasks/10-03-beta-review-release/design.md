@@ -42,7 +42,7 @@
 ## 失败通知独立门控
 
 - beta 构建/测试失败可以没有 artifacts/index；通知只要求可信来源及实际失败阶段，不能先要求成功发布。合并/dispatch 实际失败也通知。
-- main 正式发布失败按可信 dispatch 的 source_pr/expected_main_sha 和实际 run 关联，回读 PR merge commit；此时不要求 PR open。普通 main push 没有 source_pr 时使用 run/commit 链接。
+- main CI以always收尾job直接拥有正式失败通知，不依赖bot dispatch后可能被防递归抑制的workflow_run。收尾job对beta/轻量/check-only/成功只完成无Secret的通知判断，job成功；main publish实际失败才checkout实际main SHA并生成只读失败report，复用Bark sender。source_pr只有同仓/main/merged且merge commit匹配actual SHA的API回读才关联；不符或API不可读保留基本run通知，valid expected SHA保留stale诊断。控制器的stable路径一律跳过通知，避免人工main run observer重复发送。
 - 成功不发 Bark；过期候选正常跳过与 fork 不通知。失败 payload 包含阶段、可用 PR/beta 标签、commit、架构/失败结果和经过验证的 GitHub run 链接，字段缺失不得阻止早期失败通知。
 - BARK_URL 只作为发送步骤 Secret，不进入 argv、日志或文档。优先复用 notification-hooks 标准库 sender 能力：dry-run、模拟接收、有界重试与响应验证；稳定事件标识便于追踪，但不承诺 Bark 服务端幂等或重跑绝不重复。
 - Secret 缺失明确记未配置，传输结果不确定不盲目重发；通知 job 失败可见，不能把它或 dispatch 发出说成正式发布成功。
@@ -52,3 +52,5 @@
 本任务 bootstrap PR 仍由用户审阅并明确授权首次合入，控制器不合并自身。真实流程/Bark 验收依赖 main 中工作流已生效与 BARK_URL；不修改运行容器。回退本任务源码/工作流，保留已发布固定镜像，不线上删除或回滚生产服务。
 
 2026-10-03最终整合：用户明确回复“合并，验证”，已授权本次bootstrap分支/PR合入并验证GHCR。整合main c8a6e83（PR9）地址-only修改，保留共享prepare、两个地址补丁与原生Dockerfile；删除品牌词/法律端点额外门禁，以真实登录表单、迁移和compiled地址RPC验收。旧品牌镜像测试记录仅为历史结果；最终以本次云端运行结果为准。
+
+2026-10-03 bot dispatch实证37079115614成功后6m39s没有下游observer；human push/dispatch均2s生成observer，默认工作流active且completed配置相同。证据最符合GITHUB_TOKEN防递归，API不提供抑制reason，不能声称服务端返回过该错误；三级链例子允许当前长度。最小修正用CI自身always收尾job，由纯布尔判断让beta/no-op job也为success，兼容既有控制器的all-job成功验证；独立收尾捕获publisher job硬超时与checkout失败。真实bot stale-main dispatch失败必须零artifact/零发布且由CI直接Bark验证后才归档。

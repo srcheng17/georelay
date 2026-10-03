@@ -186,3 +186,40 @@ jobs:
         env:
           GHCR_TOKEN: ${{ secrets.GITHUB_TOKEN }}
         run: bash scripts/publish_images.sh "$RUNNER_TEMP/checked-images"
+
+  # Own main failures here: bot-dispatched runs may have no workflow_run observer.
+  main-failure-notification:
+    needs: [checks, build, verify, publish]
+    if: always()
+    runs-on: ubuntu-latest
+    timeout-minutes: 5
+    permissions:
+      contents: read
+      pull-requests: read
+    steps:
+      # Always succeed for beta/no-op runs so the beta controller can verify all jobs.
+      - name: Decide whether main publication failed
+        id: decision
+        run: echo "notify=${{ github.ref == 'refs/heads/main' && (github.event_name == 'push' || (github.event_name == 'workflow_dispatch' && inputs.publish)) && needs.checks.outputs.image_required != 'false' && (needs.verify.result != 'success' || needs.publish.result != 'success') }}" >> "$GITHUB_OUTPUT"
+      - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4
+        if: steps.decision.outputs.notify == 'true'
+        with:
+          ref: ${{ github.sha }}
+          persist-credentials: false
+      - name: Report current main publication failure
+        if: steps.decision.outputs.notify == 'true'
+        id: report
+        env:
+          GH_TOKEN: ${{ github.token }}
+          WORKFLOW_NEEDS: ${{ toJSON(needs) }}
+        run: python3 scripts/release_control.py --main-failure --output "$RUNNER_TEMP/main-failure.json"
+      - name: Validate Bark failure notification without delivery
+        if: steps.report.outputs.notify == 'true'
+        env:
+          BARK_URL: https://notification.invalid/dry-run
+        run: python3 scripts/notify_bark.py --report "$RUNNER_TEMP/main-failure.json" --dry-run
+      - name: Notify main publication failure through Bark
+        if: steps.report.outputs.notify == 'true'
+        env:
+          BARK_URL: ${{ secrets.BARK_URL }}
+        run: python3 scripts/notify_bark.py --report "$RUNNER_TEMP/main-failure.json"
