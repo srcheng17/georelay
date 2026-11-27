@@ -9,6 +9,7 @@
 - `GEORELAY_ADDRESS_MODE=nominatim|application`，缺省 `nominatim`。application 使用 `POST /v1/reverse` 和 `POST /v1/lookup`。
 - `TeslaMate.Locations.LocalIdentities.initialize_fresh(fresh_install: true)` 预览；增加 `apply: true` 才初始化。PG 没有负地址不能证明从未使用旧 SQLite，fresh 声明由操作者核实。
 - `TeslaMate.Locations.LocalIdentities.import_file(path)` 预览；增加 `apply: true` 才导入。结果为 `{:ok, %{mode: :preview|:applied|:already_initialized, kind: :fresh|:legacy, addresses: count, legacy_high_water: count}}` 或固定错误 atom。
+- `TeslaMate.Locations.LocalIdentities.relink_osm_source(local_osm_id, {old_type, old_id})` 预览；`apply: true, replacement: {new_type, new_id}` 确认后重查。返回 mode、local_osm_id、previous、replacement 或固定错误 atom。
 - `python3 scripts/export_legacy_identities.py SNAPSHOT` 默认只读审计；`--export --output PATH` 输出 0600 JSON，拒绝覆盖。仅经核实旧 schema 语义时使用 `--legacy-osm-implies-outside`。
 - `addresses.latitude/longitude` 为不限 scale NUMERIC；`georelay_address_identity_seq` 为降序 BIGINT；`georelay_identity_state` 保存 singleton/version/kind/evidence_sha256/legacy_high_water。
 - 完成显式初始化/导入后才建立 `addresses_georelay_coordinates_index`，只约束负 node 的精确坐标。旧 osm_id/type 唯一约束保留。
@@ -26,7 +27,9 @@ reverse 请求：
 
 lookup 把 `address` 改为 `addresses` 数组，逻辑批次最多 50 项。可选 `provider=amap|baidu|osm` 覆盖本次策略；缺省环境策略 `GEOCODER_PROVIDER=auto|amap|baidu|osm`、`MAINLAND_PROVIDER=amap|baidu`。语言 trim/lower。
 
-context 必须有布尔 `outside_mainland`；可选 `source_osm_type/source_osm_id` 必须成对，只有两字段都缺失才表示没有来源；显式 null、单字段或错误类型拒绝，来源为 node/way/relation 与正 BIGINT。它们是验证后的官方来源，不能从客户端历史正数 hash 推导。永久 context 存在 `addresses.raw.georelay`，增加 `version: 1`；供应商切换有界合并保留来源与独立境外证据；请求已有来源时，响应缺省来源可沿用，响应另给不同 type/id 必须拒绝。`provider=osm` 本身不证明境外。
+context 必须有布尔 `outside_mainland`；可选 `source_osm_type/source_osm_id` 必须成对，只有两字段都缺失才表示没有来源；显式 null、单字段或错误类型拒绝，来源为 node/way/relation 与正 BIGINT。它们是验证后的官方来源，不能从客户端历史正数 hash 推导。永久 context 存在 `addresses.raw.georelay`，增加 `version: 1`；供应商切换有界合并保留来源与独立境外证据。普通反查和刷新可沿用响应缺省的来源，拒绝不同的 type/id。`provider=osm` 本身不证明境外。
+
+`POST /v1/osm-source/relink` 仅允许当前 OSM 路由和已有可信来源的地址。实时验证旧来源缺失，再用原坐标核验不同的 OSM 候选及境外证据，两次请求复用公共限流。预览不写库；确认后重新检查，并在行锁内比对预期来源、坐标和证据，只更新 `raw.georelay` 中的来源 type/id。保留地址身份、现有文字和历史引用。
 
 响应保持 Nominatim 形状，osm_id/type/lat/lon 与请求一致，并有 `georelay={version:1,...context}`。身份为负 node BIGINT，分配范围为 -1 至 -(2^63-1)。坐标为 canonical Decimal 字符串，不舍入；coefficient 与 exponent 各限 1024，输入最多 2050 字节，lat/lon 分别限 ±90/±180。请求体最多 65536 字节；应用按编码大小拆成不超过 60 KiB 的子请求，并在整个逻辑批次验证完成后返回，后续子请求失败不能写入此前结果。
 
@@ -40,7 +43,7 @@ legacy 导入先核验全部证据、旧 PG/raw、坐标与来源；恢复可证
 
 ### 缓存与供应商
 
-`ADAPTER_CACHE_DB=/data/cache.sqlite3`；旧 `ADAPTER_DB` 明确拒绝。已有 identities 文件拒绝且不修改。只有 cache 表与 expires 索引；模板不含客户端身份/坐标，按精确点、语言、策略、来源/境外 context 分隔，响应时附当前请求身份。默认 TTL 86400 秒，每 60 秒最多删除 500 条过期记录，复用页面，无 VACUUM。缓存失效或整体删除不影响 PG 身份；TTL 不自动写回历史地址。
+`ADAPTER_CACHE_DB=/data/cache.sqlite3`；旧 `ADAPTER_DB` 明确拒绝。已有 identities 文件拒绝且不修改。只有 cache 表与 expires 索引；模板按精确点、策略和来源/境外 context 分隔，OSM 额外区分语言。已确认来自高德或百度的模板可跨语言复用，响应时附当前请求的身份与坐标。默认 TTL 86400 秒，每 60 秒最多删除 500 条过期记录，复用页面，无 VACUUM。缓存失效或整体删除不影响 PG 身份；TTL 不自动写回历史地址。
 
 存储与返回始终 WGS84。仅 mainland AMap 请求临时 GCJ02；global AMap 与百度使用原 WGS84。GCJ矩形不能充当国界；框内大陆服务失败须用 OSM 国家/港澳 ISO 证据确认境外，不能静默把大陆失败视为 OSM 成功。香港澳门 `country_code=cn` 时识别 `CN-HK/CN-MO`。
 
@@ -48,7 +51,7 @@ AMap regeo 使用 `extensions=all`；名称依次取供应商排序首项 AOI、
 
 网络默认 8 秒、无重试；reverse 总预算 min(25,2*timeout+1)，lookup 默认 20 秒、固定 4 线程共享 deadline。任意失败立即取消排队任务，成功仍按请求顺序返回；不能以输入顺序等待遮住后续失败。缓存可保留已成功模板，响应不可部分成功。
 
-`NOMINATIM_BASE_URL` 只接受 HTTP/HTTPS origin，可含端口/尾斜杠，禁止 userinfo/path/query/fragment。Geocoder 与 size3 Finch pool 使用同一校验、保留 NOMINATIM_PROXY。`NOMINATIM_LOCAL_IDENTITIES_ONLY` 保持旧默认路径契约，application 独立启用新协议。AMAP_KEY/AMAP_KEY_FILE 互斥且只给 sidecar；其他 Key 同样禁止日志输出。
+`NOMINATIM_BASE_URL` 只接受 HTTP/HTTPS origin，可含端口/尾斜杠，禁止 userinfo/path/query/fragment。默认 Nominatim 模式保留 `NOMINATIM_PROXY` 及 `NOMINATIM_LOCAL_IDENTITIES_ONLY`。application 模式要求显式配置适配器源地址并拒绝公共 Nominatim，通过直接的 size=3 Finch pool 请求适配器。AMAP_KEY/AMAP_KEY_FILE 互斥且只给 sidecar；其他 Key 同样禁止日志输出。
 
 ## 4. Validation & Error Matrix
 
@@ -60,6 +63,8 @@ AMap regeo 使用 `extensions=all`；名称依次取供应商排序首项 AOI、
 | 非 node 负身份 | HTTP 422 |
 | 缺配置、缓存不可用 | HTTP 503 |
 | 上游失败/非法或错身份响应 | HTTP 502 |
+| 有效 OSM lookup 批次缺已有对象 | HTTP 502 `stale_osm_source`，应用返回 `:stale_osm_source` 并保留原语言及地址 |
+| 显式重绑时旧来源仍存在 | HTTP 409 `osm_source_not_stale`，应用不写地址 |
 | 网络、锁或整体预算耗尽 | HTTP 504 |
 | 未显式初始化 PG | `:identity_store_not_initialized`，零地址写入 |
 | application 网络错误 | `:geocoder_unavailable`，不写 Unknown |

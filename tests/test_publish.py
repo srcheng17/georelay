@@ -199,6 +199,10 @@ class PublicationTests(unittest.TestCase):
         indexes = [i for i, command in enumerate(commands) if command[:3] == ["buildx", "imagetools", "create"]]
         self.assertEqual(len(loads), 2)
         self.assertEqual(len(pushes), 4)
+        self.assertEqual(
+            [commands[index][1:3] for index in pushes],
+            [["--platform", "linux/amd64"]] * 2 + [["--platform", "linux/arm64"]] * 2,
+        )
         self.assertEqual(len(indexes), 4)
         self.assertTrue(loads[0] < pushes[0] < pushes[1] < loads[1] < pushes[2] < pushes[3] < indexes[0])
         version_reads = [i for i, command in enumerate(commands) if command[:3] == ["buildx", "imagetools", "inspect"] and not command[-1].endswith(":latest")]

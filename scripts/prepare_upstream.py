@@ -14,6 +14,10 @@ ROOT = Path(__file__).resolve().parents[1]
 REPOSITORY = "https://github.com/teslamate-org/teslamate.git"
 
 
+class PatchConflict(ValueError):
+    """The exact upstream tree cannot apply a patch in the local series."""
+
+
 def load_pin(path=ROOT / "upstream.json"):
     pin = json.loads(Path(path).read_text())
     if (
@@ -33,7 +37,7 @@ def git(directory, *args, env=None):
     ).stdout.strip()
 
 
-def prepare(destination, pin_path=ROOT / "upstream.json", patches_dir=ROOT / "patches"):
+def prepare(destination, pin_path=ROOT / "upstream.json", patches_dir=ROOT / "patches", *, check_only=False):
     pin = load_pin(pin_path)
     patches = sorted(Path(patches_dir).glob("*.patch"))
     if not patches:
@@ -50,17 +54,27 @@ def prepare(destination, pin_path=ROOT / "upstream.json", patches_dir=ROOT / "pa
     actual = git(destination, "rev-parse", "FETCH_HEAD^{commit}")
     if actual != pin["commit"]:
         raise ValueError("release tag does not resolve to the pinned commit; refusing to patch")
-    git(destination, "checkout", "--quiet", "--detach", actual)
+    if not check_only:
+        git(destination, "checkout", "--quiet", "--detach", actual)
     patch_args = [str(p.resolve()) for p in patches]
     # Later patches may depend on earlier ones. Validate the whole series in an
     # isolated index first so a conflict in patch N cannot leave patches 1..N-1
     # applied to the source. This never modifies the real index or working tree.
     with tempfile.TemporaryDirectory(prefix="georelay-patch-check-") as temporary:
         environment = dict(os.environ, GIT_INDEX_FILE=str(Path(temporary) / "index"))
-        git(destination, "read-tree", "HEAD", env=environment)
+        git(destination, "read-tree", actual, env=environment)
         for patch in patch_args:
-            git(destination, "apply", "--cached", "--check", patch, env=environment)
+            try:
+                git(destination, "apply", "--cached", "--check", patch, env=environment)
+            except subprocess.CalledProcessError as exc:
+                # git apply uses exit 1 for an inapplicable patch and 128 for
+                # fatal errors such as unreadable inputs or an invalid index.
+                if exc.returncode == 1:
+                    raise PatchConflict(Path(patch).name) from exc
+                raise
             git(destination, "apply", "--cached", patch, env=environment)
+    if check_only:
+        return
     for patch in patch_args:
         git(destination, "apply", "--check", patch)
         git(destination, "apply", patch)

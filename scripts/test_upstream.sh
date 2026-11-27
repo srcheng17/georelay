@@ -48,7 +48,8 @@ docker run --rm --name "$name-elixir" --network "$name" \
     mix compile --warnings-as-errors
     mix format --check-formatted \
       lib/teslamate/http.ex lib/teslamate/locations.ex lib/teslamate/locations/geocoder.ex \
-      lib/teslamate/locations/address.ex lib/teslamate/locations/local_identities.ex \
+      lib/teslamate/locations/address.ex lib/teslamate/locations/adapter_geocoder.ex \
+      lib/teslamate/locations/local_identities.ex \
       priv/repo/migrations/20261003000000_prepare_application_address_identities.exs \
       test/teslamate/http_test.exs test/teslamate/settings_test.exs \
       test/teslamate/locations/geocoder_adapter_test.exs \

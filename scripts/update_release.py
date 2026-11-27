@@ -9,9 +9,10 @@ from pathlib import Path
 import re
 import subprocess
 import sys
+import tempfile
 
 from check_release import check_release
-from prepare_upstream import ROOT, load_pin
+from prepare_upstream import PatchConflict, ROOT, load_pin, prepare
 from image_context import pull_number
 
 
@@ -43,7 +44,18 @@ def sha(value):
     return value
 
 
-def update_release(repository, pin, source, api=github, run=command, detect=check_release, record_verify=None, repair_verify=None):
+def preflight(proposed):
+    with tempfile.TemporaryDirectory(prefix="georelay-upstream-preflight-") as temporary:
+        directory = Path(temporary)
+        pin_path = directory / "upstream.json"
+        pin_path.write_text(json.dumps(proposed), encoding="utf-8")
+        prepare(directory / "source", pin_path=pin_path, check_only=True)
+
+
+def update_release(
+    repository, pin, source, api=github, run=command, detect=check_release,
+    record_verify=None, repair_verify=None, check_patches=preflight,
+):
     if not re.fullmatch(r"[A-Za-z0-9_.-]+/[A-Za-z0-9_.-]+", repository):
         raise UpdateError("Invalid GitHub repository")
     sha(source)
@@ -133,9 +145,12 @@ def update_release(repository, pin, source, api=github, run=command, detect=chec
     if pull["html_url"] != "https://github.com/" + repository + "/pull/" + number:
         raise UpdateError("Update PR number does not match its URL")
 
-    # Recheck mutable refs and the official proposal before dispatching.
-    if ref("main") != source or ref(branch) != revision or detect(pin)["proposed"] != proposed:
-        raise UpdateError("Source or release changed during update; refusing to dispatch")
+    def check_current_candidate():
+        if ref("main") != source or ref(branch) != revision or detect(pin)["proposed"] != proposed:
+            raise UpdateError("Source or release changed during update; refusing to dispatch")
+
+    # Recheck mutable refs and the official proposal before checking run history.
+    check_current_candidate()
     runs = json.loads(run(
         "gh", "run", "list", "--repo", repository, "--workflow", "ci.yml",
         "--branch", branch, "--event", "workflow_dispatch", "--commit", revision,
@@ -218,14 +233,25 @@ def update_release(repository, pin, source, api=github, run=command, detect=chec
             break
         else:
             raise UpdateError("Unknown workflow run status")
-    if not started:
-        run("gh", "workflow", "run", "ci.yml", "--repo", repository, "--ref", branch,
-            "-f", "publish=true", "-f", "source_pr=" + number)
     report.update({
         "status": repair_status or ("already_started" if started else "dispatched"),
         "branch": branch, "source_main": source, "source_commit": revision, "pull_request": pull["html_url"],
         "next_step": "CI tests both architectures before publishing beta. The trusted controller may merge a still-current PR, then dispatch main for checked formal images/latest. No running services are deployed.",
     })
+    if not started:
+        # The validated pin-only candidate uses the current checkout's patches.
+        # Already running or recorded publications keep their existing path.
+        try:
+            check_patches(proposed)
+        except PatchConflict as exc:
+            report.update(
+                status="blocked_patch_conflict", patch=str(exc),
+                next_step="Update the conflicting patch against the pinned official source before dispatching CI.",
+            )
+            return report
+        check_current_candidate()
+        run("gh", "workflow", "run", "ci.yml", "--repo", repository, "--ref", branch,
+            "-f", "publish=true", "-f", "source_pr=" + number)
     return report
 
 

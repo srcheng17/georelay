@@ -1,16 +1,90 @@
 diff --git a/elixir/lib/teslamate/http.ex b/elixir/lib/teslamate/http.ex
-index aaaa484..c386f1d 100644
+index aaaa484..0ac2ac4 100644
 --- a/elixir/lib/teslamate/http.ex
 +++ b/elixir/lib/teslamate/http.ex
-@@ -91,6 +91,7 @@ defmodule TeslaMate.HTTP do
+@@ -1,16 +1,37 @@
+ defmodule TeslaMate.HTTP do
+   require Logger
  
-   def child_spec(_arg) do
-     nominatim_local_identities_only?()
-+    application_address_identities?()
++  @public_nominatim_host "nominatim.openstreetmap.org"
++
+   def nominatim_base_url do
+-    url = System.get_env("NOMINATIM_BASE_URL", "https://nominatim.openstreetmap.org")
++    System.get_env("NOMINATIM_BASE_URL", "https://#{@public_nominatim_host}")
++    |> parse_origin!()
++    |> URI.to_string()
++  end
++
++  def adapter_base_url do
++    url =
++      System.get_env("NOMINATIM_BASE_URL") ||
++        raise ArgumentError, "Application address mode requires an explicit NOMINATIM_BASE_URL"
  
-     Finch.child_spec(name: __MODULE__, pools: pools())
++    uri = parse_origin!(url)
++
++    if uri.host |> URI.decode() |> String.downcase() |> String.trim_trailing(".") ==
++         @public_nominatim_host do
++      raise ArgumentError, "Application address mode requires a GeoRelay adapter origin"
++    end
++
++    URI.to_string(uri)
++  end
++
++  defp parse_origin!(url) do
+     with {:ok, uri} <- URI.new(url),
+          true <- uri.scheme in ["http", "https"],
+          true <- is_binary(uri.host) and uri.host != "",
+          true <- is_integer(uri.port) and uri.port in 1..65_535,
+          true <- is_nil(uri.userinfo) and uri.path in [nil, "/"],
+          true <- is_nil(uri.query) and is_nil(uri.fragment) do
+-      URI.to_string(%{uri | path: nil})
++      %{uri | path: nil}
+     else
+       _ ->
+         raise ArgumentError,
+@@ -19,18 +40,13 @@ defmodule TeslaMate.HTTP do
    end
-@@ -115,6 +116,14 @@ defmodule TeslaMate.HTTP do
+ 
+   def pools do
+-    nominatim_proxy =
+-      case build_proxy_opts_from_env("NOMINATIM_PROXY") do
+-        {:ok, opts} -> opts
+-        {:none, _} -> []
+-        {:error, _} -> []
+-      end
++    {geocoder_url, geocoder_opts} = geocoder_pool()
+ 
+     %{
+       System.get_env("TESLA_API_HOST", "https://owner-api.teslamotors.com") => [
+         size: System.get_env("TESLA_API_POOL_SIZE", "10") |> String.to_integer()
+       ],
+-      nominatim_base_url() => [size: 3] ++ nominatim_proxy,
++      geocoder_url => geocoder_opts,
+       "https://api.github.com" => [size: 1],
+       System.get_env("TESLA_AUTH_HOST", "https://auth.tesla.com") => [
+         protocols: [:http1, :http2],
+@@ -44,6 +60,20 @@ defmodule TeslaMate.HTTP do
+     }
+   end
+ 
++  defp geocoder_pool do
++    if application_address_identities?() do
++      {adapter_base_url(), [size: 3]}
++    else
++      proxy =
++        case build_proxy_opts_from_env("NOMINATIM_PROXY") do
++          {:ok, opts} -> opts
++          _ -> []
++        end
++
++      {nominatim_base_url(), [size: 3] ++ proxy}
++    end
++  end
++
+   @pool_timeout System.get_env("HTTP_POOL_TIMEOUT", "10000") |> String.to_integer()
+ 
+   @spec build_proxy_opts_from_env(binary) :: {:ok, keyword} | {:none, []} | {:error, []}
+@@ -115,6 +145,14 @@ defmodule TeslaMate.HTTP do
      |> Finch.request(__MODULE__, opts)
    end
  
@@ -26,7 +100,7 @@ index aaaa484..c386f1d 100644
      case System.get_env("NOMINATIM_LOCAL_IDENTITIES_ONLY", "false") do
        "true" -> true
 diff --git a/elixir/lib/teslamate/locations.ex b/elixir/lib/teslamate/locations.ex
-index 0344a4a..93d4019 100644
+index 0344a4a..37c93d5 100644
 --- a/elixir/lib/teslamate/locations.ex
 +++ b/elixir/lib/teslamate/locations.ex
 @@ -8,7 +8,7 @@ defmodule TeslaMate.Locations do
@@ -34,7 +108,7 @@ index 0344a4a..93d4019 100644
    import TeslaMate.CustomExpressions
  
 -  alias __MODULE__.{Address, Geocoder, GeoFence}
-+  alias __MODULE__.{Address, Geocoder, GeoFence, LocalIdentities}
++  alias __MODULE__.{AdapterGeocoder, Address, Geocoder, GeoFence, LocalIdentities}
    alias TeslaMate.Log.{Drive, ChargingProcess}
    alias TeslaMate.Settings.GlobalSettings
    alias TeslaMate.{HTTP, Mutex, Repo, Settings}
@@ -99,19 +173,21 @@ index 0344a4a..93d4019 100644
        |> Enum.chunk_every(50)
  
      with {:ok, localized} <- collect(chunks, &fetch_localized_chunk(&1, lang)) do
-@@ -104,7 +116,10 @@ defmodule TeslaMate.Locations do
+@@ -104,7 +116,12 @@ defmodule TeslaMate.Locations do
    end
  
    defp fetch_localized_chunk(addresses, lang) do
 -    with {:ok, attrs} <- nominatim(fn -> @geocoder.details(addresses, lang) end) do
-+    details = fn -> @geocoder.details(addresses, lang) end
-+    result = if HTTP.application_address_identities?(), do: details.(), else: nominatim(details)
++    result =
++      if HTTP.application_address_identities?(),
++        do: AdapterGeocoder.details(addresses, lang),
++        else: nominatim(fn -> @geocoder.details(addresses, lang) end)
 +
 +    with {:ok, attrs} <- result do
        addresses
        |> merge_addresses(attrs)
        |> collect(&localize(&1, lang))
-@@ -121,9 +136,16 @@ defmodule TeslaMate.Locations do
+@@ -121,9 +138,16 @@ defmodule TeslaMate.Locations do
  
    # The lookup did not return the address
    defp localize({%Address{osm_id: id} = address, nil}, lang) do
@@ -131,7 +207,7 @@ index 0344a4a..93d4019 100644
    end
  
    defp reverse_localize(%Address{osm_id: id, osm_type: type} = address, lang) do
-@@ -160,6 +182,11 @@ defmodule TeslaMate.Locations do
+@@ -160,6 +184,11 @@ defmodule TeslaMate.Locations do
               update_address(address, attrs)
             end) do
        :ok
@@ -143,102 +219,27 @@ index 0344a4a..93d4019 100644
      end
    end
  
-diff --git a/elixir/lib/teslamate/locations/address.ex b/elixir/lib/teslamate/locations/address.ex
-index 912fe89..02b4fcd 100644
---- a/elixir/lib/teslamate/locations/address.ex
-+++ b/elixir/lib/teslamate/locations/address.ex
-@@ -25,6 +25,10 @@ defmodule TeslaMate.Locations.Address do
- 
-   @doc false
-   def changeset(address, attrs) do
-+    coordinate_attrs = Map.take(attrs, [:latitude, :longitude, "latitude", "longitude"])
-+    application? = TeslaMate.HTTP.application_address_identities?()
-+    attrs = if application?, do: Map.drop(attrs, Map.keys(coordinate_attrs)), else: attrs
+diff --git a/elixir/lib/teslamate/locations/adapter_geocoder.ex b/elixir/lib/teslamate/locations/adapter_geocoder.ex
+new file mode 100644
+index 0000000..402a436
+--- /dev/null
++++ b/elixir/lib/teslamate/locations/adapter_geocoder.ex
+@@ -0,0 +1,189 @@
++defmodule TeslaMate.Locations.AdapterGeocoder do
++  @moduledoc false
 +
-     address
-     |> cast(attrs, [
-       :display_name,
-@@ -44,6 +48,7 @@ defmodule TeslaMate.Locations.Address do
-       :country,
-       :raw
-     ])
-+    |> exact_coordinates(coordinate_attrs, application?)
-     |> validate_required([
-       :display_name,
-       :osm_id,
-@@ -54,4 +59,27 @@ defmodule TeslaMate.Locations.Address do
-     ])
-     |> unique_constraint(:osm_id, name: :addresses_osm_id_osm_type_index)
-   end
++  alias TeslaMate.HTTP
++  alias TeslaMate.Locations.{Geocoder, LocalIdentities}
 +
-+  defp exact_coordinates(changeset, _attrs, false), do: changeset
-+
-+  defp exact_coordinates(changeset, attrs, true) do
-+    Enum.reduce([{:latitude, 90}, {:longitude, 180}], changeset, fn {field, limit}, acc ->
-+      case Map.fetch(attrs, field) do
-+        :error -> apply_coordinate(acc, field, limit, Map.fetch(attrs, Atom.to_string(field)))
-+        result -> apply_coordinate(acc, field, limit, result)
-+      end
-+    end)
++  defp client do
++    Tesla.client(
++      [{Tesla.Middleware.BaseUrl, HTTP.adapter_base_url()}, Tesla.Middleware.JSON],
++      {Tesla.Adapter.Finch, name: HTTP, receive_timeout: 30_000}
++    )
 +  end
 +
-+  defp apply_coordinate(changeset, _field, _limit, :error), do: changeset
-+
-+  defp apply_coordinate(changeset, field, limit, {:ok, value}) do
-+    case TeslaMate.Locations.LocalIdentities.canonical(value, limit) do
-+      {:ok, text} ->
-+        put_change(changeset, field, Decimal.new(text, max_digits: 1024, max_exponent: 1024))
-+
-+      {:error, _} ->
-+        add_error(changeset, field, "is invalid")
-+    end
-+  end
- end
-diff --git a/elixir/lib/teslamate/locations/geocoder.ex b/elixir/lib/teslamate/locations/geocoder.ex
-index 3b57f58..a54bc31 100644
---- a/elixir/lib/teslamate/locations/geocoder.ex
-+++ b/elixir/lib/teslamate/locations/geocoder.ex
-@@ -6,8 +6,7 @@ defmodule TeslaMate.Locations.Geocoder do
-       [
-         {Tesla.Middleware.BaseUrl, TeslaMate.HTTP.nominatim_base_url()},
-         {Tesla.Middleware.Headers, [{"user-agent", "TeslaMate/#{TeslaMate.Version.version()}"}]},
--        Tesla.Middleware.JSON,
--        {Tesla.Middleware.Logger, debug: true, level: &log_level/1}
-+        Tesla.Middleware.JSON
-       ],
-       {Tesla.Adapter.Finch, name: TeslaMate.HTTP, receive_timeout: 30_000}
-     )
-@@ -30,13 +29,23 @@ defmodule TeslaMate.Locations.Geocoder do
-       lon: lon
-     ]
- 
--    with {:ok, address_raw} <- query("/reverse", lang, opts),
-+    with false <- TeslaMate.HTTP.application_address_identities?(),
-+         {:ok, address_raw} <- query("/reverse", lang, opts),
-          {:ok, address} <- into_address(address_raw) do
-       {:ok, address}
-+    else
-+      true -> {:error, :local_identity_required}
-+      error -> error
-     end
-   end
- 
-   def details(addresses, lang) when is_list(addresses) do
-+    if TeslaMate.HTTP.application_address_identities?(),
-+      do: local_details(addresses, lang),
-+      else: nominatim_details(addresses, lang)
-+  end
-+
-+  defp nominatim_details(addresses, lang) do
-     osm_ids =
-       addresses
-       |> Enum.reject(fn %Address{} = a -> a.osm_id == nil or a.osm_type in [nil, "unknown"] end)
-@@ -83,6 +92,150 @@ defmodule TeslaMate.Locations.Geocoder do
-       {:error, reason}
-   end
- 
-+  def reverse_local(request, language) do
-+    with true <- TeslaMate.Locations.LocalIdentities.ready?(),
++  def reverse(request, language) do
++    with true <- LocalIdentities.ready?(),
 +         {:ok, raw} <-
 +           local_query("/v1/reverse", %{
 +             "version" => 1,
@@ -253,14 +254,14 @@ index 3b57f58..a54bc31 100644
 +    end
 +  end
 +
-+  defp local_details(addresses, language) do
-+    with true <- TeslaMate.Locations.LocalIdentities.ready?() do
++  def details(addresses, language) do
++    with true <- LocalIdentities.ready?() do
 +      requests =
 +        addresses
 +        |> Enum.filter(&(&1.osm_id && &1.osm_id < 0))
 +        |> Enum.uniq_by(&{&1.osm_type, &1.osm_id})
 +        |> Enum.map(fn address ->
-+          case TeslaMate.Locations.LocalIdentities.request_address(address) do
++          case LocalIdentities.request_address(address) do
 +            {:ok, request} -> request
 +            {:error, reason} -> throw({:local_error, reason})
 +          end
@@ -280,6 +281,29 @@ index 3b57f58..a54bc31 100644
 +    end
 +  catch
 +    {:local_error, reason} -> {:error, reason}
++  end
++
++  def relink_source(request, language) do
++    context = request["context"]
++    unlinked = %{request | "context" => %{"outside_mainland" => false}}
++
++    with {:ok, body} <-
++           local_query("/v1/osm-source/relink", %{
++             "version" => 1,
++             "address" => request,
++             "language" => language
++           }),
++         {:ok, %{raw: raw}} <- validate_local_response(body, unlinked),
++         %{"source_osm_type" => kind, "source_osm_id" => id, "outside_mainland" => outside} <-
++           raw["georelay"],
++         %{"provider" => "osm", "osm_type" => ^kind, "osm_id" => ^id} <- raw["upstream"],
++         true <- outside == context["outside_mainland"],
++         true <- {kind, id} != {context["source_osm_type"], context["source_osm_id"]} do
++      {:ok, {kind, id}}
++    else
++      {:error, _} = error -> error
++      _ -> {:error, :invalid_adapter_response}
++    end
 +  end
 +
 +  # Keep the ordinary 50-item request intact. Exceptionally long exact decimals
@@ -337,6 +361,14 @@ index 3b57f58..a54bc31 100644
 +      {:ok, %Tesla.Env{status: 200, body: body}} ->
 +        {:ok, body}
 +
++      {:ok, %Tesla.Env{status: 502, body: %{"error" => "stale_osm_source"}}}
++      when url == "/v1/lookup" ->
++        {:error, :stale_osm_source}
++
++      {:ok, %Tesla.Env{status: 409, body: %{"error" => "osm_source_not_stale"}}}
++      when url == "/v1/osm-source/relink" ->
++        {:error, :osm_source_not_stale}
++
 +      {:ok, %Tesla.Env{status: status}} when status in [502, 503, 504] ->
 +        {:error, :geocoder_unavailable}
 +
@@ -351,19 +383,20 @@ index 3b57f58..a54bc31 100644
 +  end
 +
 +  defp validate_local_response(raw, request) when is_map(raw) and is_map(request) do
-+    local = TeslaMate.Locations.LocalIdentities
-+
 +    with true <- raw["osm_id"] == request["osm_id"] and raw["osm_type"] == "node",
 +         true <- is_binary(raw["display_name"]) and String.trim(raw["display_name"]) != "",
 +         true <- not Map.has_key?(raw, "error"),
-+         {:ok, lat} <- local.canonical(raw["lat"], 90),
-+         {:ok, lon} <- local.canonical(raw["lon"], 180),
++         {:ok, lat} <- LocalIdentities.canonical(raw["lat"], 90),
++         {:ok, lon} <- LocalIdentities.canonical(raw["lon"], 180),
 +         true <- lat == request["lat"] and lon == request["lon"],
 +         %{"version" => 1} = metadata <- raw["georelay"],
-+         {:ok, _} <- local.validate_context(metadata),
++         {:ok, _} <- LocalIdentities.validate_context(metadata),
 +         true <- matching_source?(request["context"], metadata),
 +         true <- is_map(raw["address"] || %{}),
-+         {:ok, address} <- into_address(local.merge_raw(%{"georelay" => request["context"]}, raw)) do
++         {:ok, address} <-
++           Geocoder.into_address(
++             LocalIdentities.merge_raw(%{"georelay" => request["context"]}, raw)
++           ) do
 +      {:ok, %{address | latitude: request["lat"], longitude: request["lon"]}}
 +    else
 +      _ -> {:error, :invalid_adapter_response}
@@ -380,11 +413,108 @@ index 3b57f58..a54bc31 100644
 +      Map.take(requested, ["source_osm_type", "source_osm_id"]) ==
 +        Map.take(returned, ["source_osm_type", "source_osm_id"])
 +  end
++end
+diff --git a/elixir/lib/teslamate/locations/address.ex b/elixir/lib/teslamate/locations/address.ex
+index 912fe89..02b4fcd 100644
+--- a/elixir/lib/teslamate/locations/address.ex
++++ b/elixir/lib/teslamate/locations/address.ex
+@@ -25,6 +25,10 @@ defmodule TeslaMate.Locations.Address do
+ 
+   @doc false
+   def changeset(address, attrs) do
++    coordinate_attrs = Map.take(attrs, [:latitude, :longitude, "latitude", "longitude"])
++    application? = TeslaMate.HTTP.application_address_identities?()
++    attrs = if application?, do: Map.drop(attrs, Map.keys(coordinate_attrs)), else: attrs
 +
-   defp query(url, lang, params) do
-     case get(url, query: params, headers: [{"Accept-Language", lang}]) do
-       {:ok, %Tesla.Env{status: 200, body: body}} -> {:ok, body}
-@@ -177,8 +330,4 @@ defmodule TeslaMate.Locations.Geocoder do
+     address
+     |> cast(attrs, [
+       :display_name,
+@@ -44,6 +48,7 @@ defmodule TeslaMate.Locations.Address do
+       :country,
+       :raw
+     ])
++    |> exact_coordinates(coordinate_attrs, application?)
+     |> validate_required([
+       :display_name,
+       :osm_id,
+@@ -54,4 +59,27 @@ defmodule TeslaMate.Locations.Address do
+     ])
+     |> unique_constraint(:osm_id, name: :addresses_osm_id_osm_type_index)
+   end
++
++  defp exact_coordinates(changeset, _attrs, false), do: changeset
++
++  defp exact_coordinates(changeset, attrs, true) do
++    Enum.reduce([{:latitude, 90}, {:longitude, 180}], changeset, fn {field, limit}, acc ->
++      case Map.fetch(attrs, field) do
++        :error -> apply_coordinate(acc, field, limit, Map.fetch(attrs, Atom.to_string(field)))
++        result -> apply_coordinate(acc, field, limit, result)
++      end
++    end)
++  end
++
++  defp apply_coordinate(changeset, _field, _limit, :error), do: changeset
++
++  defp apply_coordinate(changeset, field, limit, {:ok, value}) do
++    case TeslaMate.Locations.LocalIdentities.canonical(value, limit) do
++      {:ok, text} ->
++        put_change(changeset, field, Decimal.new(text, max_digits: 1024, max_exponent: 1024))
++
++      {:error, _} ->
++        add_error(changeset, field, "is invalid")
++    end
++  end
+ end
+diff --git a/elixir/lib/teslamate/locations/geocoder.ex b/elixir/lib/teslamate/locations/geocoder.ex
+index 3b57f58..d4f1353 100644
+--- a/elixir/lib/teslamate/locations/geocoder.ex
++++ b/elixir/lib/teslamate/locations/geocoder.ex
+@@ -6,14 +6,17 @@ defmodule TeslaMate.Locations.Geocoder do
+       [
+         {Tesla.Middleware.BaseUrl, TeslaMate.HTTP.nominatim_base_url()},
+         {Tesla.Middleware.Headers, [{"user-agent", "TeslaMate/#{TeslaMate.Version.version()}"}]},
+-        Tesla.Middleware.JSON,
+-        {Tesla.Middleware.Logger, debug: true, level: &log_level/1}
++        Tesla.Middleware.JSON
+       ],
+       {Tesla.Adapter.Finch, name: TeslaMate.HTTP, receive_timeout: 30_000}
+     )
+   end
+ 
+-  defp get(url, opts), do: Tesla.get(client(), url, opts)
++  defp get(url, opts) do
++    if TeslaMate.HTTP.application_address_identities?(),
++      do: {:error, :local_identity_required},
++      else: Tesla.get(client(), url, opts)
++  end
+ 
+   # Spaces the requests, see Nominatim's usage policy
+   def now, do: System.monotonic_time(:millisecond)
+@@ -129,7 +132,8 @@ defmodule TeslaMate.Locations.Geocoder do
+   # state: ranks 5-9
+   @state_labels ~w(state province territory)
+ 
+-  defp into_address(%{"error" => "Unable to geocode"} = raw) do
++  @doc false
++  def into_address(%{"error" => "Unable to geocode"} = raw) do
+     unknown_address = %{
+       display_name: "Unknown",
+       osm_type: "unknown",
+@@ -142,11 +146,11 @@ defmodule TeslaMate.Locations.Geocoder do
+     {:ok, unknown_address}
+   end
+ 
+-  defp into_address(%{"error" => reason}) do
++  def into_address(%{"error" => reason}) do
+     {:error, {:geocoding_failed, reason}}
+   end
+ 
+-  defp into_address(raw) do
++  def into_address(raw) do
+     address = %{
+       display_name: Map.get(raw, "display_name"),
+       osm_id: Map.get(raw, "osm_id"),
+@@ -177,8 +181,4 @@ defmodule TeslaMate.Locations.Geocoder do
    defp get_first(address, [label | labels]) do
      with nil <- Map.get(address, label), do: get_first(address, labels)
    end
@@ -395,10 +525,10 @@ index 3b57f58..a54bc31 100644
  end
 diff --git a/elixir/lib/teslamate/locations/local_identities.ex b/elixir/lib/teslamate/locations/local_identities.ex
 new file mode 100644
-index 0000000..07bd612
+index 0000000..e623834
 --- /dev/null
 +++ b/elixir/lib/teslamate/locations/local_identities.ex
-@@ -0,0 +1,431 @@
+@@ -0,0 +1,519 @@
 +defmodule TeslaMate.Locations.LocalIdentities do
 +  @moduledoc """
 +  Application-owned exact WGS84 identities. Initialization is explicit and never
@@ -407,8 +537,8 @@ index 0000000..07bd612
 +  """
 +
 +  import Ecto.Query
-+  alias TeslaMate.{Repo, Locations}
-+  alias TeslaMate.Locations.{Address, Geocoder}
++  alias TeslaMate.{HTTP, Locations, Mutex, Repo, Settings}
++  alias TeslaMate.Locations.{AdapterGeocoder, Address}
 +
 +  @max_id 9_223_372_036_854_775_807
 +  @max_export_bytes 67_108_864
@@ -560,7 +690,7 @@ index 0000000..07bd612
 +          "context" => %{"outside_mainland" => false}
 +        }
 +
-+        with {:ok, attrs} <- Geocoder.reverse_local(request, language),
++        with {:ok, attrs} <- AdapterGeocoder.reverse(request, language),
 +             {:ok, _candidate} <-
 +               %Address{}
 +               |> Address.changeset(attrs)
@@ -579,6 +709,94 @@ index 0000000..07bd612
 +      _ ->
 +        {:error, :identity_store_unavailable}
 +    end
++  end
++
++  @doc "Preview a live OSM relink. Apply requires the explicitly reviewed replacement."
++  def relink_osm_source(local_osm_id, previous, opts \\ [])
++
++  def relink_osm_source(local_osm_id, {kind, source_id} = previous, opts)
++      when is_integer(local_osm_id) and local_osm_id in -@max_id..-1 and
++             kind in ["node", "way", "relation"] and is_integer(source_id) and
++             source_id in 1..@max_id and is_list(opts) do
++    with true <- HTTP.application_address_identities?() or {:error, :local_identity_required},
++         true <- ready?() or {:error, :identity_store_not_initialized},
++         {:ok, reviewed} <- relink_replacement(opts) do
++      query = from(a in Address, where: a.osm_id == ^local_osm_id and a.osm_type == "node")
++      operation = fn -> relink(query, previous, reviewed) end
++
++      if is_nil(reviewed),
++        do: operation.(),
++        else: Mutex.run(Settings.language_change_mutex(), operation)
++    end
++  rescue
++    _ -> {:error, :identity_store_unavailable}
++  end
++
++  def relink_osm_source(_, _, _), do: {:error, :invalid_relink_identity}
++
++  defp relink_replacement(opts) do
++    case {Keyword.get(opts, :apply, false), Keyword.get(opts, :replacement)} do
++      {false, nil} ->
++        {:ok, nil}
++
++      {true, {kind, id} = replacement}
++      when kind in ["node", "way", "relation"] and is_integer(id) and id in 1..@max_id ->
++        {:ok, replacement}
++
++      _ ->
++        {:error, :reviewed_replacement_required}
++    end
++  end
++
++  defp relink(query, previous, reviewed) do
++    with {:ok, request} <- checked_source_request(Repo.one(query, log: false), previous),
++         {:ok, replacement} <-
++           AdapterGeocoder.relink_source(request, Settings.get_global_settings!().language) do
++      report = %{
++        local_osm_id: request["osm_id"],
++        previous: previous,
++        replacement: replacement
++      }
++
++      case reviewed do
++        nil -> {:ok, Map.put(report, :mode, :preview)}
++        ^replacement -> apply_relink(query, request, Map.put(report, :mode, :applied))
++        _ -> {:error, :osm_replacement_changed}
++      end
++    end
++  end
++
++  defp checked_source_request(nil, _), do: {:error, :local_address_not_found}
++
++  defp checked_source_request(%Address{} = address, {kind, id}) do
++    with {:ok, request} <- request_address(address),
++         %{"source_osm_type" => ^kind, "source_osm_id" => ^id} <- request["context"] do
++      {:ok, request}
++    else
++      {:error, _} = error -> error
++      _ -> {:error, :osm_source_changed}
++    end
++  end
++
++  defp apply_relink(query, request, report) do
++    transact(fn ->
++      address = Repo.one(from(a in query, lock: "FOR UPDATE"), log: false)
++
++      unless checked_source_request(address, report.previous) == {:ok, request},
++        do: Repo.rollback(:osm_source_changed)
++
++      {kind, id} = report.replacement
++
++      raw =
++        Map.update!(address.raw, "georelay", fn context ->
++          %{context | "source_osm_type" => kind, "source_osm_id" => id}
++        end)
++
++      case Repo.update_all(query, [set: [raw: raw]], log: false) do
++        {1, _} -> report
++        _ -> Repo.rollback(:identity_store_unavailable)
++      end
++    end)
 +  end
 +
 +  @doc "Default is a read-only preview. apply requires an explicit fresh-install assertion."
@@ -867,6 +1085,64 @@ index 0000000..daf8f4e
 +    raise "GeoRelay address identity rollback requires a matched database/legacy snapshot; precision cannot be reduced safely"
 +  end
 +end
+diff --git a/elixir/test/teslamate/http_test.exs b/elixir/test/teslamate/http_test.exs
+index 843e3a7..0387a03 100644
+--- a/elixir/test/teslamate/http_test.exs
++++ b/elixir/test/teslamate/http_test.exs
+@@ -3,7 +3,7 @@ defmodule TeslaMate.HTTPTest do
+   import ExUnit.CaptureLog
+ 
+   setup do
+-    for key <- ["NOMINATIM_BASE_URL", "NOMINATIM_PROXY"] do
++    for key <- ["GEORELAY_ADDRESS_MODE", "NOMINATIM_BASE_URL", "NOMINATIM_PROXY"] do
+       value = System.get_env(key)
+       System.delete_env(key)
+ 
+@@ -56,6 +56,44 @@ defmodule TeslaMate.HTTPTest do
+     end
+   end
+ 
++  test "application startup requires an explicit non-public adapter origin" do
++    System.put_env("GEORELAY_ADDRESS_MODE", "application")
++
++    assert_raise ArgumentError,
++                 "Application address mode requires an explicit NOMINATIM_BASE_URL",
++                 fn ->
++                   TeslaMate.HTTP.child_spec(nil)
++                 end
++
++    for url <- [
++          "https://nominatim.openstreetmap.org",
++          "http://NOMINATIM.OpenStreetMap.org.:8080/",
++          "http://nominatim%2eopenstreetmap.org"
++        ] do
++      System.put_env("NOMINATIM_BASE_URL", url)
++
++      assert_raise ArgumentError,
++                   "Application address mode requires a GeoRelay adapter origin",
++                   fn ->
++                     TeslaMate.HTTP.child_spec(nil)
++                   end
++    end
++  end
++
++  test "the application adapter pool never inherits the Nominatim proxy" do
++    System.put_env("GEORELAY_ADDRESS_MODE", "application")
++    System.put_env("NOMINATIM_BASE_URL", "http://adapter:8080/")
++    System.put_env("NOMINATIM_PROXY", "http://127.0.0.1:7890")
++
++    log =
++      capture_log(fn ->
++        assert TeslaMate.HTTP.adapter_base_url() == "http://adapter:8080"
++        assert TeslaMate.HTTP.pools()["http://adapter:8080"] == [size: 3]
++      end)
++
++    refute log =~ "NOMINATIM_PROXY"
++  end
++
+   test "invalid origins fail closed without reflecting the configured value" do
+     for origin <- [
+           "",
 diff --git a/elixir/test/teslamate/locations/addresses_test.exs b/elixir/test/teslamate/locations/addresses_test.exs
 index 0bab9a8..3707de2 100644
 --- a/elixir/test/teslamate/locations/addresses_test.exs
@@ -906,15 +1182,15 @@ index 0bab9a8..3707de2 100644
      end
 diff --git a/elixir/test/teslamate/locations/local_identities_test.exs b/elixir/test/teslamate/locations/local_identities_test.exs
 new file mode 100644
-index 0000000..68dc601
+index 0000000..b063c6b
 --- /dev/null
 +++ b/elixir/test/teslamate/locations/local_identities_test.exs
-@@ -0,0 +1,669 @@
+@@ -0,0 +1,803 @@
 +defmodule TeslaMate.Locations.LocalIdentitiesTest do
 +  use TeslaMate.DataCase, async: false
 +
 +  alias TeslaMate.{HTTP, Locations, Log, Settings}
-+  alias TeslaMate.Locations.{Address, Geocoder, LocalIdentities}
++  alias TeslaMate.Locations.{AdapterGeocoder, Address, Geocoder, LocalIdentities}
 +  alias TeslaMate.Log.{ChargingProcess, Drive}
 +  import Mock
 +  import ExUnit.CaptureLog
@@ -955,7 +1231,7 @@ index 0000000..68dc601
 +             LocalIdentities.initialize_fresh(apply: true)
 +
 +    assert {:error, :identity_store_not_initialized} = Locations.find_address(point())
-+    assert {:error, :identity_store_not_initialized} = Geocoder.details([], "en")
++    assert {:error, :identity_store_not_initialized} = AdapterGeocoder.details([], "en")
 +    assert Repo.aggregate(Address, :count) == 0
 +    initialize()
 +    assert LocalIdentities.ready?()
@@ -1156,7 +1432,6 @@ index 0000000..68dc601
 +    old = historical(42, "way")
 +
 +    with_mocks [
-+      {GeocoderMock, [:passthrough], details: &Geocoder.details/2},
 +      {Tesla.Adapter.Finch, [],
 +       call: fn env, _ ->
 +         assert env.method == :post
@@ -1180,7 +1455,7 @@ index 0000000..68dc601
 +    assert stored.display_name == "Refreshed"
 +    assert stored.latitude == local.latitude
 +    assert Repo.get!(Address, old.id) == old
-+    assert {:ok, []} = Geocoder.details([old], "en")
++    assert {:ok, []} = AdapterGeocoder.details([old], "en")
 +  end
 +
 +  test "an existing trusted source must match even a structurally valid response source" do
@@ -1202,7 +1477,6 @@ index 0000000..68dc601
 +          Map.put(source_context(), "source_osm_type", "relation")
 +        ] do
 +      with_mocks [
-+        {GeocoderMock, [:passthrough], details: &Geocoder.details/2},
 +        {Tesla.Adapter.Finch, [],
 +         call: fn env, _ ->
 +           raw = request |> response() |> Map.put("display_name", "Mismatched source")
@@ -1218,6 +1492,120 @@ index 0000000..68dc601
 +      assert Settings.get_global_settings!().language == "en"
 +      assert Repo.get!(Address, local.id) == local
 +    end
++  end
++
++  test "a stale OSM source blocks atomic settings changes without exposing data" do
++    initialize()
++    {address, _request} = source_address()
++
++    with_mock Tesla.Adapter.Finch,
++      call: fn env, _ ->
++        assert env.url == "http://adapter:8080/v1/lookup"
++        {:ok, %{env | status: 502, body: %{"error" => "stale_osm_source"}}}
++      end do
++      assert {:error, :stale_osm_source} = change_language()
++    end
++
++    assert Settings.get_global_settings!().language == "en"
++    assert Repo.get!(Address, address.id) == address
++  end
++
++  test "an OSM relink previews and revalidates the reviewed replacement without changing the address" do
++    initialize()
++    {address, request} = source_address()
++    previous = {"way", 42}
++    replacement = {"node", 123}
++    report = %{local_osm_id: address.osm_id, previous: previous, replacement: replacement}
++
++    with_mock Tesla.Adapter.Finch,
++      call: fn env, _ ->
++        assert env.method == :post
++        assert env.url == "http://adapter:8080/v1/osm-source/relink"
++
++        assert Jason.decode!(env.body) ==
++                 %{"version" => 1, "address" => request, "language" => "en"}
++
++        {:ok, %{env | status: 200, body: relink_response(request, replacement)}}
++      end do
++      assert {:error, :reviewed_replacement_required} =
++               LocalIdentities.relink_osm_source(address.osm_id, previous, apply: true)
++
++      refute called(Tesla.Adapter.Finch.call(:_, :_))
++
++      assert LocalIdentities.relink_osm_source(address.osm_id, previous) ==
++               {:ok, Map.put(report, :mode, :preview)}
++
++      assert Repo.get!(Address, address.id) == address
++
++      assert {:error, :osm_replacement_changed} =
++               LocalIdentities.relink_osm_source(address.osm_id, previous,
++                 apply: true,
++                 replacement: {"way", 123}
++               )
++
++      assert Repo.get!(Address, address.id) == address
++
++      assert LocalIdentities.relink_osm_source(address.osm_id, previous,
++               apply: true,
++               replacement: replacement
++             ) == {:ok, Map.put(report, :mode, :applied)}
++    end
++
++    expected_raw =
++      Map.put(address.raw, "georelay", %{
++        "version" => 1,
++        "source_osm_type" => "node",
++        "source_osm_id" => 123,
++        "outside_mainland" => true
++      })
++
++    assert Repo.get!(Address, address.id) == %{address | raw: expected_raw}
++    assert Repo.aggregate(Address, :count) == 1
++
++    assert {:error, :osm_source_changed} =
++             LocalIdentities.relink_osm_source(address.osm_id, previous)
++  end
++
++  test "an OSM relink rejects an intact source, unverified candidates and a changed row" do
++    initialize()
++    {address, request} = source_address()
++    previous = {"way", 42}
++    replacement = {"node", 123}
++    raw = relink_response(request, replacement)
++
++    for {status, body, reason} <- [
++          {409, %{"error" => "osm_source_not_stale"}, :osm_source_not_stale},
++          {200, Map.put(raw, "lat", "0"), :invalid_adapter_response},
++          {200, Map.delete(raw, "upstream"), :invalid_adapter_response},
++          {200, put_in(raw["georelay"]["outside_mainland"], false), :invalid_adapter_response}
++        ] do
++      with_mock Tesla.Adapter.Finch,
++        call: fn env, _ -> {:ok, %{env | status: status, body: body}} end do
++        assert {:error, ^reason} =
++                 LocalIdentities.relink_osm_source(address.osm_id, previous,
++                   apply: true,
++                   replacement: replacement
++                 )
++      end
++
++      assert Repo.get!(Address, address.id) == address
++    end
++
++    with_mock Tesla.Adapter.Finch,
++      call: fn env, _ ->
++        different = put_in(address.raw, ["georelay", "source_osm_id"], 99)
++        {:ok, _} = address |> Ecto.Changeset.change(raw: different) |> Repo.update(log: false)
++        {:ok, %{env | status: 200, body: raw}}
++      end do
++      assert {:error, :osm_source_changed} =
++               LocalIdentities.relink_osm_source(address.osm_id, previous,
++                 apply: true,
++                 replacement: replacement
++               )
++    end
++
++    assert Repo.get!(Address, address.id).raw["georelay"]["source_osm_id"] == 99
++    assert Repo.aggregate(Address, :count) == 1
 +  end
 +
 +  test "a newly allocated address can retain newly validated source provenance" do
@@ -1256,7 +1644,6 @@ index 0000000..68dc601
 +          %{"outside_mainland" => false, "source_osm_type" => nil, "source_osm_id" => 42}
 +        ] do
 +      with_mocks [
-+        {GeocoderMock, [:passthrough], details: &Geocoder.details/2},
 +        {Tesla.Adapter.Finch, [],
 +         call: fn env, _ ->
 +           raw = request |> response() |> Map.put("display_name", "Untrusted replacement")
@@ -1304,7 +1691,6 @@ index 0000000..68dc601
 +
 +    for kind <- [:missing, :duplicate, :extra, :coordinates] do
 +      with_mocks [
-+        {GeocoderMock, [:passthrough], details: &Geocoder.details/2},
 +        {Tesla.Adapter.Finch, [],
 +         call: fn env, _ ->
 +           requests = Jason.decode!(env.body)["addresses"]
@@ -1503,9 +1889,9 @@ index 0000000..68dc601
 +          end
 +        end do
 +        if fail_second? do
-+          assert {:error, :geocoder_unavailable} = Geocoder.details(addresses, "en")
++          assert {:error, :geocoder_unavailable} = AdapterGeocoder.details(addresses, "en")
 +        else
-+          assert {:ok, details} = Geocoder.details(addresses, "en")
++          assert {:ok, details} = AdapterGeocoder.details(addresses, "en")
 +          assert length(details) == 50
 +          assert Enum.map(details, & &1.osm_id) == Enum.map(addresses, & &1.osm_id)
 +        end
@@ -1530,6 +1916,30 @@ index 0000000..68dc601
 +
 +  defp source_context,
 +    do: %{"source_osm_type" => "way", "source_osm_id" => 42, "outside_mainland" => true}
++
++  defp source_address do
++    request = identity(-42, "48.858400123", "2.294500456", source_context())
++
++    {:ok, address} =
++      Locations.create_address(%{
++        osm_id: request["osm_id"],
++        osm_type: "node",
++        latitude: request["lat"],
++        longitude: request["lon"],
++        display_name: "Original",
++        raw: response(request)
++      })
++
++    {address, request}
++  end
++
++  defp relink_response(request, {kind, id}) do
++    request
++    |> put_in(["context", "source_osm_type"], kind)
++    |> put_in(["context", "source_osm_id"], id)
++    |> response()
++    |> Map.put("upstream", %{"provider" => "osm", "osm_type" => kind, "osm_id" => id})
++  end
 +
 +  defp response(request) do
 +    %{

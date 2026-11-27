@@ -89,7 +89,8 @@ for key, value in {"source": os.environ["IMAGE_SOURCE"], "revision": os.environ[
     assert labels["org.opencontainers.image." + key] == value, "incorrect OCI " + key
 ' "$architecture"
     docker tag "$image:checked" "$package:$version-$architecture"
-    docker push "$package:$version-$architecture"
+    # Push the checked runtime manifest only, even if Docker attached build attestations.
+    docker push --platform "linux/$architecture" "$package:$version-$architecture"
   done
 done
 
