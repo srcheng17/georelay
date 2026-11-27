@@ -320,25 +320,25 @@ class MainImageSmokeTests(unittest.TestCase):
             self.assertEqual((status, body["osm_id"], body["lat"]), (200, -10001, module.LAT))
             self.assertEqual(body["georelay"], {"version": 1, **module.CONTEXT})
             item["context"] = module.CONTEXT
-            lookup = {"version": 1, "addresses": [item], "language": "zh-CN"}
-            for language in ("zh-CN", "en"):
+            lookup = {"version": 1, "addresses": [item]}
+            for language in ("zh", "en"):
                 lookup["language"] = language
                 status, body = fetch("/v1/lookup", lookup)
                 self.assertEqual((status, body[0]["name"], body[0]["lat"]), (200, "Fixture Updated", module.LAT))
-            lookup["language"] = "missing"
+            lookup["language"] = "de"
             self.assertEqual(fetch("/v1/lookup", lookup), (200, []))
-            lookup["language"] = "shifted"
+            lookup["language"] = "es"
             self.assertEqual(fetch("/v1/lookup", lookup)[1][0]["lat"], "49")
-            lookup["language"] = "null-source"
+            lookup["language"] = "fr"
             status, body = fetch("/v1/lookup", lookup)
             self.assertEqual(status, 200)
             self.assertEqual(body[0]["georelay"], {"version": 1, "outside_mainland": False,
                                                 "source_osm_type": None, "source_osm_id": None})
-            lookup["language"] = "wrong-source"
+            lookup["language"] = "it"
             status, body = fetch("/v1/lookup", lookup)
             self.assertEqual(status, 200)
             self.assertEqual(body[0]["georelay"]["source_osm_id"], 456)
-            lookup["language"] = "provider-fail"
+            lookup["language"] = "nl"
             self.assertEqual(fetch("/v1/lookup", lookup), (502, {"error": "fixture_provider_failure"}))
             item["lat"] = "48.8585"
             self.assertEqual(fetch("/v1/reverse", reverse), (502, {"error": "fixture_provider_failure"}))

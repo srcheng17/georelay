@@ -6,10 +6,12 @@ from http.server import BaseHTTPRequestHandler, HTTPServer
 LAT, LON = "48.858400123", "2.294500456"
 CONCURRENT_LAT = "48.858401123"
 CONTEXT = {"source_osm_type": "node", "source_osm_id": 123, "outside_mainland": True}
-EXPECTED = [("reverse", "en"), ("lookup", "zh-cn"), ("lookup", "en"),
-            ("lookup", "missing"), ("lookup", "shifted"), ("lookup", "null-source"),
-            ("lookup", "wrong-source"),
-            ("lookup", "provider-fail"), ("reverse", "en")]
+LOOKUP_FAILURES = {
+    "de": "missing", "es": "shifted", "fr": "null-source",
+    "it": "wrong-source", "nl": "provider-fail",
+}
+EXPECTED = [("reverse", "en"), ("lookup", "zh"), ("lookup", "en"),
+            *(("lookup", language) for language in LOOKUP_FAILURES), ("reverse", "en")]
 
 
 def address(item, refreshed=False):
@@ -90,15 +92,16 @@ class Handler(BaseHTTPRequestHandler):
                 if (item["osm_id"] != self.server.first_id or (item["lat"], item["lon"]) != (LAT, LON)
                         or item.get("context") != CONTEXT):
                     raise ValueError
-                if language == "provider-fail":
+                failure = LOOKUP_FAILURES.get(language)
+                if failure == "provider-fail":
                     self.respond(502, {"error": "fixture_provider_failure"})
                     return
-                body = [] if language == "missing" else [address(item, True)]
-                if language == "shifted":
+                body = [] if failure == "missing" else [address(item, True)]
+                if failure == "shifted":
                     body[0]["lat"] = "49"
-                if language == "wrong-source":
+                if failure == "wrong-source":
                     body[0]["georelay"]["source_osm_id"] = 456
-                if language == "null-source":
+                if failure == "null-source":
                     body[0]["georelay"] = {"version": 1, "outside_mainland": False,
                                             "source_osm_type": None, "source_osm_id": None}
             self.respond(200, body)

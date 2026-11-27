@@ -26,7 +26,7 @@ index aaaa484..c386f1d 100644
      case System.get_env("NOMINATIM_LOCAL_IDENTITIES_ONLY", "false") do
        "true" -> true
 diff --git a/elixir/lib/teslamate/locations.ex b/elixir/lib/teslamate/locations.ex
-index cce5b95..f08738a 100644
+index 0344a4a..93d4019 100644
 --- a/elixir/lib/teslamate/locations.ex
 +++ b/elixir/lib/teslamate/locations.ex
 @@ -8,7 +8,7 @@ defmodule TeslaMate.Locations do
@@ -37,7 +37,7 @@ index cce5b95..f08738a 100644
 +  alias __MODULE__.{Address, Geocoder, GeoFence, LocalIdentities}
    alias TeslaMate.Log.{Drive, ChargingProcess}
    alias TeslaMate.Settings.GlobalSettings
-   alias TeslaMate.{Repo, Settings}
+   alias TeslaMate.{HTTP, Mutex, Repo, Settings}
 @@ -18,13 +18,18 @@ defmodule TeslaMate.Locations do
    def create_address(attrs \\ %{}) do
      %Address{}
@@ -48,7 +48,7 @@ index cce5b95..f08738a 100644
  
    def update_address(%Address{} = address, attrs) do
 +    attrs =
-+      if TeslaMate.HTTP.application_address_identities?() and Map.has_key?(attrs, :raw),
++      if HTTP.application_address_identities?() and Map.has_key?(attrs, :raw),
 +        do: Map.update!(attrs, :raw, &LocalIdentities.merge_raw(address.raw, &1)),
 +        else: attrs
 +
@@ -63,7 +63,7 @@ index cce5b95..f08738a 100644
    def find_address(%{latitude: lat, longitude: lng}) do
      %GlobalSettings{language: lang} = Settings.get_global_settings!()
  
-+    if TeslaMate.HTTP.application_address_identities?() do
++    if HTTP.application_address_identities?() do
 +      LocalIdentities.find_address(lat, lng, lang)
 +    else
 +      find_nominatim_address(lat, lng, lang)
@@ -71,42 +71,78 @@ index cce5b95..f08738a 100644
 +  end
 +
 +  defp find_nominatim_address(lat, lng, lang) do
-     case @geocoder.reverse_lookup(lat, lng, lang) do
+     case nominatim(fn -> @geocoder.reverse_lookup(lat, lng, lang) end) do
        {:ok, %{osm_id: id, osm_type: type} = attrs} ->
          case Repo.get_by(Address, osm_id: id, osm_type: type) do
-@@ -48,10 +61,12 @@ defmodule TeslaMate.Locations do
+@@ -83,19 +96,18 @@ defmodule TeslaMate.Locations do
+   ]
+ 
+   @doc """
+-  Fetches all addresses from Nominatim in the language `lang`, without writing
+-  anything. Pass the result to `update_addresses/1`.
++  Fetches localized addresses in the language `lang` without writing anything.
++  Pass the result to `update_addresses/1`.
+ 
+-  This takes a while with many addresses: requests are paced to Nominatim's
+-  usage policy. So call it outside of a transaction, which would hold a
+-  database connection that long.
++  Call it outside of a transaction so the database connection is released
++  during geocoding. Public Nominatim requests are paced to its usage policy.
+ 
+   An address that Nominatim now reports as a different place is skipped.
+   """
+   def fetch_localized_addresses(lang) do
+     chunks =
+       Address
+-      |> Repo.all()
++      |> Repo.all(log: false)
+       |> Enum.chunk_every(50)
+ 
+     with {:ok, localized} <- collect(chunks, &fetch_localized_chunk(&1, lang)) do
+@@ -104,7 +116,10 @@ defmodule TeslaMate.Locations do
    end
  
-   def refresh_addresses(lang) do
--    local_identities_only? = TeslaMate.HTTP.nominatim_local_identities_only?()
-+    local_identities_only? =
-+      TeslaMate.HTTP.nominatim_local_identities_only?() or
-+        TeslaMate.HTTP.application_address_identities?()
+   defp fetch_localized_chunk(addresses, lang) do
+-    with {:ok, attrs} <- nominatim(fn -> @geocoder.details(addresses, lang) end) do
++    details = fn -> @geocoder.details(addresses, lang) end
++    result = if HTTP.application_address_identities?(), do: details.(), else: nominatim(details)
++
++    with {:ok, attrs} <- result do
+       addresses
+       |> merge_addresses(attrs)
+       |> collect(&localize(&1, lang))
+@@ -121,9 +136,16 @@ defmodule TeslaMate.Locations do
  
-     Address
--    |> Repo.all()
-+    |> Repo.all(log: false)
-     |> Enum.chunk_every(50)
-     |> Enum.with_index()
-     |> Enum.each(fn {addresses, i} ->
-@@ -123,8 +138,15 @@ defmodule TeslaMate.Locations do
-     end)
-   rescue
-     e in MatchError ->
--      Logger.error(Exception.format(:error, e, __STACKTRACE__))
--      {:error, with({:error, reason} <- e.term, do: reason)}
-+      Logger.error("Address refresh failed")
-+      reason = with({:error, reason} <- e.term, do: reason)
+   # The lookup did not return the address
+   defp localize({%Address{osm_id: id} = address, nil}, lang) do
+-    if id > 0 and HTTP.nominatim_local_identities_only?(),
+-      do: :skip,
+-      else: reverse_localize(address, lang)
++    cond do
++      HTTP.application_address_identities?() ->
++        if id < 0, do: {:error, :invalid_adapter_response}, else: :skip
 +
-+      reason =
-+        if TeslaMate.HTTP.application_address_identities?() and not is_atom(reason),
-+          do: :address_refresh_failed,
-+          else: reason
++      id > 0 and HTTP.nominatim_local_identities_only?() ->
++        :skip
 +
-+      {:error, reason}
++      true ->
++        reverse_localize(address, lang)
++    end
    end
  
-   defp merge_addresses(addresses, attrs) do
+   defp reverse_localize(%Address{osm_id: id, osm_type: type} = address, lang) do
+@@ -160,6 +182,11 @@ defmodule TeslaMate.Locations do
+              update_address(address, attrs)
+            end) do
+       :ok
++    else
++      {:error, reason} ->
++        if HTTP.application_address_identities?() and not is_atom(reason),
++          do: {:error, :address_refresh_failed},
++          else: {:error, reason}
+     end
+   end
+ 
 diff --git a/elixir/lib/teslamate/locations/address.ex b/elixir/lib/teslamate/locations/address.ex
 index 912fe89..02b4fcd 100644
 --- a/elixir/lib/teslamate/locations/address.ex
@@ -159,20 +195,20 @@ index 912fe89..02b4fcd 100644
 +  end
  end
 diff --git a/elixir/lib/teslamate/locations/geocoder.ex b/elixir/lib/teslamate/locations/geocoder.ex
-index cb92e40..7b83960 100644
+index 3b57f58..a54bc31 100644
 --- a/elixir/lib/teslamate/locations/geocoder.ex
 +++ b/elixir/lib/teslamate/locations/geocoder.ex
-@@ -8,8 +8,7 @@ defmodule TeslaMate.Locations.Geocoder do
+@@ -6,8 +6,7 @@ defmodule TeslaMate.Locations.Geocoder do
        [
          {Tesla.Middleware.BaseUrl, TeslaMate.HTTP.nominatim_base_url()},
-         {Tesla.Middleware.Headers, [{"user-agent", "TeslaMate/#{@version}"}]},
+         {Tesla.Middleware.Headers, [{"user-agent", "TeslaMate/#{TeslaMate.Version.version()}"}]},
 -        Tesla.Middleware.JSON,
 -        {Tesla.Middleware.Logger, debug: true, level: &log_level/1}
 +        Tesla.Middleware.JSON
        ],
        {Tesla.Adapter.Finch, name: TeslaMate.HTTP, receive_timeout: 30_000}
      )
-@@ -28,13 +27,23 @@ defmodule TeslaMate.Locations.Geocoder do
+@@ -30,13 +29,23 @@ defmodule TeslaMate.Locations.Geocoder do
        lon: lon
      ]
  
@@ -197,7 +233,7 @@ index cb92e40..7b83960 100644
      osm_ids =
        addresses
        |> Enum.reject(fn %Address{} = a -> a.osm_id == nil or a.osm_type in [nil, "unknown"] end)
-@@ -81,6 +90,150 @@ defmodule TeslaMate.Locations.Geocoder do
+@@ -83,6 +92,150 @@ defmodule TeslaMate.Locations.Geocoder do
        {:error, reason}
    end
  
@@ -348,7 +384,7 @@ index cb92e40..7b83960 100644
    defp query(url, lang, params) do
      case get(url, query: params, headers: [{"Accept-Language", lang}]) do
        {:ok, %Tesla.Env{status: 200, body: body}} -> {:ok, body}
-@@ -175,8 +328,4 @@ defmodule TeslaMate.Locations.Geocoder do
+@@ -177,8 +330,4 @@ defmodule TeslaMate.Locations.Geocoder do
    defp get_first(address, [label | labels]) do
      with nil <- Map.get(address, label), do: get_first(address, labels)
    end
@@ -832,7 +868,7 @@ index 0000000..daf8f4e
 +  end
 +end
 diff --git a/elixir/test/teslamate/locations/addresses_test.exs b/elixir/test/teslamate/locations/addresses_test.exs
-index 4983d91..5f9825b 100644
+index 0bab9a8..3707de2 100644
 --- a/elixir/test/teslamate/locations/addresses_test.exs
 +++ b/elixir/test/teslamate/locations/addresses_test.exs
 @@ -76,8 +76,8 @@ defmodule TeslaMate.LocationsAddressesTest do
@@ -857,16 +893,27 @@ index 4983d91..5f9825b 100644
        assert address.name == "some updated name"
        assert address.neighbourhood == "some updated neighbourhood"
        assert address.osm_id == 43
+@@ -183,8 +183,8 @@ defmodule TeslaMate.LocationsAddressesTest do
+                raw: %{"error" => "Unable to geocode"}
+              } = address
+ 
+-      assert latitude == Decimal.new("0.000000")
+-      assert longitude == Decimal.new("0.000000")
++      assert Decimal.equal?(latitude, Decimal.new(0))
++      assert Decimal.equal?(longitude, Decimal.new(0))
+ 
+       assert [^address] = Repo.all(Address)
+     end
 diff --git a/elixir/test/teslamate/locations/local_identities_test.exs b/elixir/test/teslamate/locations/local_identities_test.exs
 new file mode 100644
-index 0000000..9d3805a
+index 0000000..68dc601
 --- /dev/null
 +++ b/elixir/test/teslamate/locations/local_identities_test.exs
-@@ -0,0 +1,662 @@
+@@ -0,0 +1,669 @@
 +defmodule TeslaMate.Locations.LocalIdentitiesTest do
 +  use TeslaMate.DataCase, async: false
 +
-+  alias TeslaMate.{HTTP, Locations, Log}
++  alias TeslaMate.{HTTP, Locations, Log, Settings}
 +  alias TeslaMate.Locations.{Address, Geocoder, LocalIdentities}
 +  alias TeslaMate.Log.{ChargingProcess, Drive}
 +  import Mock
@@ -1109,13 +1156,13 @@ index 0000000..9d3805a
 +    old = historical(42, "way")
 +
 +    with_mocks [
-+      {GeocoderMock, [], details: &Geocoder.details/2},
++      {GeocoderMock, [:passthrough], details: &Geocoder.details/2},
 +      {Tesla.Adapter.Finch, [],
 +       call: fn env, _ ->
 +         assert env.method == :post
 +         assert env.url == "http://adapter:8080/v1/lookup"
 +         body = Jason.decode!(env.body)
-+         assert body["language"] == "zh-CN"
++         assert body["language"] == "zh"
 +         assert body["addresses"] == [request]
 +         refreshed = response(request) |> Map.put("display_name", "Refreshed")
 +         # A non-OSM response cannot erase earlier OSM/region evidence.
@@ -1125,7 +1172,7 @@ index 0000000..9d3805a
 +         {:ok, %{env | status: 200, body: Jason.encode!([refreshed])}}
 +       end}
 +    ] do
-+      assert Locations.refresh_addresses("zh-CN") == :ok
++      assert {:ok, %{language: "zh"}} = change_language()
 +    end
 +
 +    stored = Repo.get!(Address, local.id)
@@ -1155,7 +1202,7 @@ index 0000000..9d3805a
 +          Map.put(source_context(), "source_osm_type", "relation")
 +        ] do
 +      with_mocks [
-+        {GeocoderMock, [], details: &Geocoder.details/2},
++        {GeocoderMock, [:passthrough], details: &Geocoder.details/2},
 +        {Tesla.Adapter.Finch, [],
 +         call: fn env, _ ->
 +           raw = request |> response() |> Map.put("display_name", "Mismatched source")
@@ -1164,10 +1211,11 @@ index 0000000..9d3805a
 +         end}
 +      ] do
 +        capture_log(fn ->
-+          assert {:error, :invalid_adapter_response} = Locations.refresh_addresses("en")
++          assert {:error, :invalid_adapter_response} = change_language()
 +        end)
 +      end
 +
++      assert Settings.get_global_settings!().language == "en"
 +      assert Repo.get!(Address, local.id) == local
 +    end
 +  end
@@ -1208,7 +1256,7 @@ index 0000000..9d3805a
 +          %{"outside_mainland" => false, "source_osm_type" => nil, "source_osm_id" => 42}
 +        ] do
 +      with_mocks [
-+        {GeocoderMock, [], details: &Geocoder.details/2},
++        {GeocoderMock, [:passthrough], details: &Geocoder.details/2},
 +        {Tesla.Adapter.Finch, [],
 +         call: fn env, _ ->
 +           raw = request |> response() |> Map.put("display_name", "Untrusted replacement")
@@ -1217,10 +1265,11 @@ index 0000000..9d3805a
 +         end}
 +      ] do
 +        capture_log(fn ->
-+          assert {:error, :invalid_adapter_response} = Locations.refresh_addresses("en")
++          assert {:error, :invalid_adapter_response} = change_language()
 +        end)
 +      end
 +
++      assert Settings.get_global_settings!().language == "en"
 +      assert Repo.get!(Address, local.id) == local
 +
 +      assert Repo.get!(Address, local.id).raw["georelay"] ==
@@ -1255,7 +1304,7 @@ index 0000000..9d3805a
 +
 +    for kind <- [:missing, :duplicate, :extra, :coordinates] do
 +      with_mocks [
-+        {GeocoderMock, [], details: &Geocoder.details/2},
++        {GeocoderMock, [:passthrough], details: &Geocoder.details/2},
 +        {Tesla.Adapter.Finch, [],
 +         call: fn env, _ ->
 +           requests = Jason.decode!(env.body)["addresses"]
@@ -1274,13 +1323,14 @@ index 0000000..9d3805a
 +      ] do
 +        log =
 +          capture_log(fn ->
-+            assert {:error, :invalid_adapter_response} = Locations.refresh_addresses("en")
++            assert {:error, :invalid_adapter_response} = change_language()
 +          end)
 +
 +        refute log =~ "48.858400123"
 +        refute log =~ "Synthetic address"
 +      end
 +
++      assert Settings.get_global_settings!().language == "en"
 +      assert Repo.get!(Address, a.id) == a
 +      assert Repo.get!(Address, b.id) == b
 +    end
@@ -1467,6 +1517,10 @@ index 0000000..9d3805a
 +    assert Repo.aggregate(Address, :count) == 0
 +  end
 +
++  defp change_language do
++    Settings.update_global_settings(Settings.get_global_settings!(), %{language: "zh"})
++  end
++
 +  defp initialize do
 +    assert {:ok, %{mode: :applied}} =
 +             LocalIdentities.initialize_fresh(apply: true, fresh_install: true)
@@ -1526,10 +1580,10 @@ index 0000000..9d3805a
 +  end
 +end
 diff --git a/elixir/test/teslamate/settings_test.exs b/elixir/test/teslamate/settings_test.exs
-index a718408..0df407a 100644
+index 9444ae5..650bad0 100644
 --- a/elixir/test/teslamate/settings_test.exs
 +++ b/elixir/test/teslamate/settings_test.exs
-@@ -256,15 +256,15 @@ defmodule TeslaMate.SettingsTest do
+@@ -301,15 +301,15 @@ defmodule TeslaMate.SettingsTest do
                   name: "0_nl",
                   state: "Berlin_nl",
                   country: "nl",
@@ -1549,9 +1603,36 @@ index a718408..0df407a 100644
                 }
               ] = Repo.all(from a in Address, order_by: 1)
      end
-@@ -301,7 +301,7 @@ defmodule TeslaMate.SettingsTest do
+@@ -366,7 +366,7 @@ defmodule TeslaMate.SettingsTest do
+       assert_received {:pause, 1500, checked_out?: false}
+       refute_received {:pause, _, _}
  
-       assert {:error, :boom} = Settings.update_global_settings(settings, %{language: "nl"})
+-      zero = Decimal.new("0.000000")
++      zero = Decimal.new("0")
+       assert [%Address{id: ^id} = skipped] = Repo.all(Address)
+       assert skipped == %Address{address | latitude: zero, longitude: zero}
+     end
+@@ -393,14 +393,14 @@ defmodule TeslaMate.SettingsTest do
+ 
+       assert %GlobalSettings{language: "en"} = Settings.get_global_settings!()
+ 
+-      zero = Decimal.new("0.000000")
++      zero = Decimal.new("0")
+       assert [r0, r1] = Repo.all(from a in Address, order_by: 1)
+       assert r0 == %Address{a0 | latitude: zero, longitude: zero}
+ 
+       assert r1 == %Address{
+                a1
+-               | latitude: Decimal.new("99.900000"),
+-                 longitude: Decimal.new("99.900000")
++               | latitude: Decimal.new("99.9"),
++                 longitude: Decimal.new("99.9")
+              }
+     end
+ 
+@@ -442,7 +442,7 @@ defmodule TeslaMate.SettingsTest do
+ 
+       assert %GlobalSettings{language: "en"} = Settings.get_global_settings!()
  
 -      zero = Decimal.new("0.000000")
 +      zero = Decimal.new("0")
