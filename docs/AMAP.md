@@ -15,7 +15,7 @@ TeslaMate / PostgreSQL
 
 应用先按精确坐标查找已有本地地址，只有新坐标才申请降序负编号并解析。供应商成功后写入地址；并发首次请求通过 PostgreSQL 唯一约束收敛到胜出行。编号空洞允许，失败不会写入 Unknown。
 
-补丁同时修改 Geocoder 的 BaseUrl 和专用 Finch pool，保留 size=3 与 proxy。`GEORELAY_ADDRESS_MODE` 默认 `nominatim` 保留原 GET 官方路径；`application` 才启用本项目协议。Sidecar 无需 Tesla token、ENCRYPTION_KEY 或 PostgreSQL 权限。
+默认 `nominatim` 模式使用原 GET 路径和 `NOMINATIM_PROXY`。`application` 模式使用独立的适配器客户端和直连 Finch pool（size=3），并要求显式设置 `NOMINATIM_BASE_URL`。Sidecar 无需 Tesla token、ENCRYPTION_KEY 或 PostgreSQL 权限。
 
 地址、轨迹、缓存键和响应均保留原始 **WGS84**；高德大陆请求临时转换为 **GCJ-02**，百度直接接收 WGS84。地址文字解析仍由高德/百度/OSM提供；数据库管理编号和历史关联，不能从坐标自行得到地点名称。
 
@@ -62,6 +62,7 @@ TeslaMate 在行程结束、充电开始及缺失地址修复时解析，语言�
 | --- | --- |
 | `POST /v1/reverse` | `version=1`、`address`、`language`，以及可选 `provider`；返回 Nominatim 形状的地址 |
 | `POST /v1/lookup` | `version=1`、`addresses`（最多50项）、`language`、可选 `provider`；按请求顺序返回负 node 地址 |
+| `POST /v1/osm-source/relink` | `version=1`、单个含既有 OSM 来源的 `address`、`language`；实时查询旧来源缺失后，核验同一坐标的候选来源 |
 | `GET /health` | 仅检查本地缓存就绪，成功为 `{"status":"ok","protocol":1,"storage":"disposable-cache"}` |
 
 ```json
@@ -84,7 +85,7 @@ TeslaMate 在行程结束、充电开始及缺失地址修复时解析，语言�
 
 示例为公开虚构测试上下文；`context` 的真实值只能来自应用已有可信来源。没有来源时传 {"outside_mainland": false}；不得从任意正编号推断 OSM 对象或把显式大陆 OSM 查询当作境外证据。响应附 `georelay` 版本/来源/境外证据，应用永久保留该上下文，供应商切换不会抹掉已有可信来源。
 
-`language` 区分缓存并传给 OSM，高德/百度使用默认语言。缓存键包含规范化精确坐标、语言、策略和影响结果的来源上下文；缓存模板不保留客户端编号，返回时使用本次请求身份。删除缓存后可凭请求重建结果。
+`language` 传给 OSM 并区分其缓存。高德和百度使用默认语言，各自已解析的结果可在同一策略、精确坐标及来源上下文下跨语言复用。缓存模板在返回时附上本次请求的地址身份。删除缓存后可凭请求重建结果。
 
 | 条件 | 状态码 |
 | --- | --- |
@@ -92,13 +93,47 @@ TeslaMate 在行程结束、充电开始及缺失地址修复时解析，语言�
 | 端点不存在 | `404` |
 | 非 node 的负身份 | `422` |
 | 旧 GET 地址协议 | `409` |
+| 显式重绑时旧 OSM 对象仍可查 | `409`，`osm_source_not_stale` |
 | 上游失败、非法响应或身份不匹配 | `502` |
+| 有效 OSM 批量响应缺少既有来源对象 | `502`，`stale_osm_source` |
 | 缺配置或缓存存储不可用 | `503` |
 | 网络、限流锁或整批预算耗尽 | `504` |
 
 正数历史身份只跳过，不请求 OSM；全正批次返回 `[]`。应用刷新只传唯一的负 node 地址，保留历史正地址。lookup 失败不返回部分成功列表，不合成 Unknown；缓存可保留已成功解析的项目。应用核验返回身份集合、坐标与来源，不接受缺项、重复、额外项或移动后的坐标。
 
 lookup 使用最多4线程、同一截止时间；可信 OSM 来源仍批量匹配，公共请求维持文件锁限流。`health` 成功不能证明 Key、配额或外网可用。
+
+### 恢复已失效的 OSM 来源
+
+若语言刷新返回 `:stale_osm_source`，该次刷新回滚。对已知的行程或充电地址，可用它引用的地址表主键查出 GeoRelay 负 ID 及当前 OSM 来源。以下编号仅为示例，日志中的错误类别不会列出地址明细。
+
+```sql
+SELECT osm_id,
+       raw #>> '{georelay,source_osm_type}' AS source_type,
+       raw #>> '{georelay,source_osm_id}' AS source_id
+FROM addresses
+WHERE id = 1234 AND osm_type = 'node' AND osm_id < 0;
+```
+
+拿到这三个值后，在 TeslaMate 的 release 控制台预览。
+
+```elixir
+alias TeslaMate.Locations.LocalIdentities
+LocalIdentities.relink_osm_source(-10001, {"node", 123})
+# 预览示例：{:ok, %{mode: :preview, local_osm_id: -10001,
+#                    previous: {"node", 123}, replacement: {"way", 456}}}
+```
+
+预览会实时检查旧对象确实缺失，并按原坐标反查候选。请在 OSM 核对候选确实对应原地点，再显式应用预览中的替代来源。
+
+```elixir
+LocalIdentities.relink_osm_source(-10001, {"node", 123},
+  apply: true,
+  replacement: {"way", 456}
+)
+```
+
+应用时会再次查询，并在写入前核对同一条地址的当前来源、精确坐标和境外证据。只更新来源元数据，随后可从 TeslaMate 设置重试语言刷新。该操作适用于当前使用 OSM 的地址，包括自动策略已确认在中国大陆以外的地址。
 
 ## 配置
 
@@ -113,7 +148,7 @@ GEORELAY_ADDRESS_MODE=application
 
 仅接受 HTTP/HTTPS origin，可含端口；不能包含账号、路径、query 或 fragment，末尾 `/` 会规范化。默认值为 `https://nominatim.openstreetmap.org`。`NOMINATIM_PROXY` 是 CONNECT proxy，不能替代自定义 geocoder URL。
 
-`GEORELAY_ADDRESS_MODE=application` 启用 PostgreSQL 地址所有权与新 POST 协议；只有完成显式 fresh 初始化或 legacy 导入后才能分配/刷新地址。默认 `nominatim` 继续使用官方或自托管 OSM。原 `NOMINATIM_LOCAL_IDENTITIES_ONLY` 仅用于旧 Nominatim 刷新策略，不代替新模式初始化。
+`GEORELAY_ADDRESS_MODE=application` 启用 PostgreSQL 地址所有权与 POST 协议。启动时要求 `NOMINATIM_BASE_URL` 指向受信任的 HTTP(S) 适配器源地址，公共 `nominatim.openstreetmap.org` 会被拒绝。这个连接直达适配器。完成显式 fresh 初始化或 legacy 导入后，应用才能分配或刷新地址。默认 `nominatim` 继续使用官方或自托管 OSM，可配置 `NOMINATIM_PROXY`。原 `NOMINATIM_LOCAL_IDENTITIES_ONLY` 用于旧 Nominatim 刷新策略。
 
 ### Sidecar
 
@@ -244,9 +279,9 @@ docker compose exec -T teslamate rm /tmp/georelay-identities.json
 自动流程只发布 GHCR 镜像，不更新运行容器。
 
 1. [Check upstream release](../.github/workflows/upstream-release.yml) 每六小时检查官方稳定 release，也可在 main 手动触发。GitHub 定时调度可能延迟。
-2. 新版本创建 upstream/tag 分支与 PR，只修改 upstream.json。草稿、预发布、降级或移动 tag 停止处理；共享 prepare 只应用严格地址补丁；不重写或比对上游 UI、翻译、图标与法律文本，不追加 Dockerfile 指令。
-3. [Validate and build](../.github/workflows/ci.yml) 检出实际 PR head commit，原生 amd64/arm64 分别运行源码检查、共享 prepare/地址 ExUnit、镜像架构/用户与 adapter 许可检查，以及最终镜像内 adapter suite 和应用启动/迁移/地址闭环。应用保留上游 TeslaMate 界面，HTTP 就绪以实际登录表单为准。无需账号或真实地图 Key，使用独立临时资源。
-4. 两架构通过后，复用相同已测试产物发布两个 package 的 beta 版本并验证索引；当前 PR 可更新 beta-pr-N，不能改写 latest。
+2. 新版本创建 upstream/tag 分支与 PR，只修改 upstream.json。自动派发前在临时索引中检查固定上游和有序补丁。冲突会报告 `blocked_patch_conflict` 和冲突文件，等待补丁适配。草稿、预发布、降级或移动 tag 停止处理。
+3. [Validate and build](../.github/workflows/ci.yml) 检出实际 PR head commit，原生 amd64/arm64 分别先严格应用补丁，再运行 Python、地址 ExUnit、镜像架构/用户与 adapter 许可检查，以及最终镜像内 adapter suite 和应用启动/迁移/地址闭环。HTTP 就绪以实际登录表单为准。验证使用独立临时资源。
+4. 两架构通过后，分别推送已测试产物的可运行平台清单，再生成和验证两个 beta 索引。当前 PR 可更新 beta-pr-N，不能改写 latest。
 5. [Beta release control](../.github/workflows/beta-control.yml) 从可信 main 读取 run、PR 与 registry 元数据。两架构/verify/beta 索引与 Release 记录成功，PR 同仓且 open/non-draft、head 仍为 tested SHA、main 基线有效且服务器保护允许时，带 expected head SHA 普通 merge。fork、过期或被新提交替代的成功候选只跳过；控制器不执行候选脚本、不自动重写分支、不合并自身首次启用 PR。
 6. 合并回读成功后显式 dispatch main，绑定 expected_main_sha 与 source_pr；GITHUB_TOKEN 合并的 push 本身不会触发新 CI。main 对 merge commit 重新构建/测试，发布正式版本与 latest；推广前回读 current main。main 的镜像相关 push 或 main publish dispatch 也可正式发布，latest 跟随已审阅 main pin，无需等待尚未合入的新官方版本。
 

@@ -205,7 +205,7 @@ class AdapterTest(unittest.TestCase):
                         {**OSM, "address": []}, {**OSM, "address": {}},
                         {**OSM, "address": {"city": []}}, {**OSM, "osm_type": "unknown"},
                         {**OSM, "osm_id": -99}, {**OSM, "osm_id": True}]:
-            self.error(502, server.osm_address, payload, 1, OSM_LAT, OSM_LON)
+            self.error(502, server.osm_address, payload)
 
     def test_osm_lock_wait_has_a_deadline_across_processes(self):
         code = ("import fcntl,sys,time; "
@@ -319,16 +319,48 @@ class AdapterTest(unittest.TestCase):
         self.assertEqual(restarted.lookup([row], "zh-cn"), [first])
         self.assertEqual(upstream.call_count, 1)
         self.assertEqual(restarted.lookup([row], "en")[0]["osm_id"], -10001)
+        self.assertEqual(upstream.call_count, 1)
         self.expire()
         self.assertEqual(restarted.lookup([row], "zh-cn")[0]["lat"], precise)
-        self.assertEqual(upstream.call_count, 3)
+        self.assertEqual(upstream.call_count, 2)
         self.db_path.unlink()
         empty = server.Adapter(self.db_path, "fake-test-key")
         self.assertEqual(empty.lookup([row], "zh-cn"), [first])
-        self.assertEqual(upstream.call_count, 4)
+        self.assertEqual(upstream.call_count, 3)
         with empty.connect() as db:
             self.assertEqual({r[0] for r in db.execute("SELECT name FROM sqlite_master WHERE type='table'")}, {"cache"})
             self.assertFalse(db.execute("PRAGMA foreign_key_list(cache)").fetchall())
+
+    def test_locale_reuse_is_limited_to_keyed_results_and_preserves_existing_cache_keys(self):
+        self.adapter.baidu_ak, self.adapter.baidu_sk = "yourak", "yoursk"
+        mainland = address()
+        with patch("adapter.server.upstream", return_value=AMAP) as keyed:
+            first = self.adapter.reverse(mainland, "en")
+            policy = self.adapter.policy(None)
+            with self.adapter.connect() as db:
+                db.execute("UPDATE cache SET cache_key=?, language='en'",
+                           (self.adapter.cache_key(mainland, "en", policy),))
+            self.assertEqual(self.adapter.reverse(mainland, "en"), first)
+            keyed.assert_called_once()
+            self.assertEqual(self.adapter.reverse(mainland, "zh"), first)
+            self.assertEqual(self.adapter.lookup([mainland], "de"), [first])
+            self.assertEqual(keyed.call_count, 2)
+
+        with patch("adapter.server.upstream", return_value=BAIDU) as keyed:
+            baidu = self.adapter.lookup([mainland], "zh", "baidu")[0]
+            self.assertEqual(baidu["upstream"]["provider"], "baidu")
+            self.assertEqual(self.adapter.reverse(mainland, "en", "baidu"), baidu)
+            keyed.assert_called_once()
+
+        overseas = address(lat=OSM_LAT, lon=OSM_LON)
+        localized = {**OSM, "display_name": "Localized OSM result"}
+        with patch.object(self.adapter, "osm", side_effect=[OSM, localized]) as osm:
+            english = self.adapter.reverse(overseas, "en")
+            french = self.adapter.reverse(overseas, "fr")
+            self.assertNotEqual(english["display_name"], french["display_name"])
+            self.assertEqual(self.adapter.lookup([overseas], "en"), [english])
+            self.assertEqual(self.adapter.lookup([overseas], "fr"), [french])
+            self.assertEqual(osm.call_count, 2)
 
     @patch("adapter.server.upstream", return_value=AMAP)
     def test_concurrent_candidates_share_template_without_sharing_identity(self, upstream):
@@ -506,10 +538,21 @@ class AdapterTest(unittest.TestCase):
         rows = [address(-1, OSM_LAT, OSM_LON, {"outside_mainland": True, "source_osm_type": "way", "source_osm_id": 123}),
                 address(-2, "48.85", OSM_LON, {"outside_mainland": True, "source_osm_type": "node", "source_osm_id": 456})]
         second = {**OSM, "osm_id": 456, "osm_type": "node"}
-        for payload in [[], [OSM, OSM], [OSM], [OSM, {**second, "osm_id": 999}],
-                        [OSM, {**second, "display_name": []}], {"error": "Unable to geocode"}]:
+        for payload, message in [
+            ([], "stale_osm_source"),
+            ([OSM], "stale_osm_source"),
+            ([OSM, OSM], "Unexpected upstream identity"),
+            ([OSM, {**second, "osm_id": 999}], "Unexpected upstream identity"),
+            ([OSM, second, {**second, "osm_id": 999}], "Unexpected upstream identity"),
+            ([{**OSM, "display_name": []}], "Invalid upstream response"),
+            ([{**OSM, "address": {"country_code": "cn"}}], "Unexpected upstream coverage"),
+            ([OSM, {**second, "display_name": []}], "Invalid upstream response"),
+            ({"error": "Unable to geocode"}, "Invalid upstream response"),
+        ]:
             with patch.object(self.adapter, "osm", return_value=payload):
-                self.error(502, self.adapter.lookup, rows, "en")
+                with self.assertRaises(server.AdapterError) as raised:
+                    self.adapter.lookup(rows, "en")
+                self.assertEqual((raised.exception.status, str(raised.exception)), (502, message))
             with self.adapter.connect() as db:
                 self.assertEqual(db.execute("SELECT count(*) FROM cache").fetchone()[0], 0)
 
@@ -705,6 +748,77 @@ class AdapterTest(unittest.TestCase):
                 self.assertEqual(result[0]["upstream"]["provider"], "amap")
             with patch.object(self.adapter, "health", side_effect=sqlite3.DatabaseError(LAT)):
                 self.assertEqual(self.http(url, endpoint="/health", status=503), {"error": "Local storage unavailable"})
+
+    def test_http_osm_relink_ignores_cache_and_preserves_local_identity(self):
+        row = address(-42, OSM_LAT, OSM_LON, {
+            "outside_mainland": True, "source_osm_type": "way", "source_osm_id": 123,
+        })
+        document = {"version": 1, "address": row, "language": "EN"}
+        with patch.object(self.adapter, "osm", return_value=[OSM]):
+            self.adapter.lookup([row], "en")
+        with self.adapter.connect() as db:
+            before = db.execute("SELECT * FROM cache").fetchall()
+
+        replacement = {**OSM, "osm_type": "node", "osm_id": 456}
+        with (serving(server.Server(("127.0.0.1", 0), self.adapter)) as url,
+              patch.object(self.adapter, "osm", side_effect=[[], replacement]) as osm):
+            result = self.http(url, document, server.RELINK_ENDPOINT)
+            self.assertEqual((result["osm_id"], result["osm_type"], result["lat"], result["lon"]),
+                             (-42, "node", OSM_LAT, OSM_LON))
+            self.assertEqual(result["georelay"], {
+                "version": 1, "outside_mainland": True, "source_osm_type": "node", "source_osm_id": 456,
+            })
+            self.assertEqual(result["upstream"], {"provider": "osm", "osm_type": "node", "osm_id": 456})
+            self.assertEqual(osm.call_count, 2)
+            self.assertEqual(osm.call_args_list[0].args[:3], ("", "", "en"))
+            self.assertEqual(osm.call_args_list[0].args[-1], "W123")
+            self.assertEqual(osm.call_args_list[1].args[:3], (OSM_LAT, OSM_LON, "en"))
+        with self.adapter.connect() as db:
+            self.assertEqual(db.execute("SELECT * FROM cache").fetchall(), before)
+
+    def test_osm_relink_requires_active_osm_policy_and_verified_distinct_replacement(self):
+        row = address(-42, OSM_LAT, OSM_LON, {
+            "outside_mainland": True, "source_osm_type": "way", "source_osm_id": 123,
+        })
+        mainland = {**row, "context": {**row["context"], "outside_mainland": False}}
+        replacement = {**OSM, "osm_type": "node", "osm_id": 456}
+        mainland_replacement = {**replacement, "address": {"country_code": "cn"}}
+        with patch.object(self.adapter, "osm") as osm:
+            self.error(422, self.adapter.relink_osm_source, mainland)
+            self.error(422, self.adapter.relink_osm_source, address())
+            self.adapter.provider = "amap"
+            self.error(422, self.adapter.relink_osm_source, row)
+            osm.assert_not_called()
+        self.adapter.provider = "osm"
+        with patch.object(self.adapter, "osm", side_effect=[[], mainland_replacement]):
+            result = self.adapter.relink_osm_source(mainland)
+            self.assertFalse(result["georelay"]["outside_mainland"])
+        for responses, count in [
+            ([{"error": "private provider error"}], 1),
+            ([[replacement]], 1),
+            ([[{**OSM, "display_name": []}]], 1),
+            ([[], OSM], 2),
+            ([[], mainland_replacement], 2),
+        ]:
+            with self.subTest(responses=responses), patch.object(self.adapter, "osm", side_effect=responses) as osm:
+                self.error(502, self.adapter.relink_osm_source, row)
+                self.assertEqual(osm.call_count, count)
+
+    def test_http_osm_stale_source_and_unchanged_source_errors(self):
+        row = address(-42, OSM_LAT, OSM_LON, {
+            "outside_mainland": True, "source_osm_type": "way", "source_osm_id": 123,
+        })
+        relink = {"version": 1, "address": row, "language": "en"}
+        lookup = {"version": 1, "addresses": [row], "language": "en"}
+        with serving(server.Server(("127.0.0.1", 0), self.adapter)) as url:
+            self.http(url, {**relink, "provider": "osm"}, server.RELINK_ENDPOINT, status=400)
+            with patch.object(self.adapter, "osm", return_value=[OSM]) as osm:
+                self.assertEqual(self.http(url, relink, server.RELINK_ENDPOINT, status=409),
+                                 {"error": "osm_source_not_stale"})
+                osm.assert_called_once()
+            with patch.object(self.adapter, "osm", return_value=[]):
+                self.assertEqual(self.http(url, lookup, "/v1/lookup", status=502),
+                                 {"error": "stale_osm_source"})
 
     @patch("adapter.server.upstream", return_value=AMAP)
     def test_online_cache_backup_refuses_legacy_source_and_overwrite(self, upstream):

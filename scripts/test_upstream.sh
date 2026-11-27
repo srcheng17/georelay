@@ -41,14 +41,15 @@ docker run --rm --name "$name-elixir" --network "$name" \
   --env MIX_ENV=test --env DATABASE_HOST=db --env DATABASE_USER=postgres \
   --env DATABASE_PASS=isolated-test-only --env DATABASE_NAME=teslamate_adapter_test \
   --env ELIXIR_ASSERT_TIMEOUT=1000 --env 'ERL_FLAGS=+S 4:4' \
-  elixir:1.20.3-otp-29 bash -euc '
+  elixir:1.20.4-otp-29 bash -euc '
     mix local.hex --force
     mix local.rebar --force
     mix deps.get
     mix compile --warnings-as-errors
     mix format --check-formatted \
       lib/teslamate/http.ex lib/teslamate/locations.ex lib/teslamate/locations/geocoder.ex \
-      lib/teslamate/locations/address.ex lib/teslamate/locations/local_identities.ex \
+      lib/teslamate/locations/address.ex lib/teslamate/locations/adapter_geocoder.ex \
+      lib/teslamate/locations/local_identities.ex \
       priv/repo/migrations/20261003000000_prepare_application_address_identities.exs \
       test/teslamate/http_test.exs test/teslamate/settings_test.exs \
       test/teslamate/locations/geocoder_adapter_test.exs \

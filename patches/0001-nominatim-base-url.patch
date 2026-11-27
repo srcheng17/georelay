@@ -36,16 +36,16 @@ index c4e6dd0..1a79b2e 100644
        System.get_env("TESLA_AUTH_HOST", "https://auth.tesla.com") => [
          protocols: [:http1, :http2],
 diff --git a/elixir/lib/teslamate/locations/geocoder.ex b/elixir/lib/teslamate/locations/geocoder.ex
-index 324d87d..5f308ac 100644
+index 2a8ff38..24227c3 100644
 --- a/elixir/lib/teslamate/locations/geocoder.ex
 +++ b/elixir/lib/teslamate/locations/geocoder.ex
-@@ -6,7 +6,7 @@ defmodule TeslaMate.Locations.Geocoder do
+@@ -4,7 +4,7 @@ defmodule TeslaMate.Locations.Geocoder do
    defp client do
      Tesla.client(
        [
 -        {Tesla.Middleware.BaseUrl, "https://nominatim.openstreetmap.org"},
 +        {Tesla.Middleware.BaseUrl, TeslaMate.HTTP.nominatim_base_url()},
-         {Tesla.Middleware.Headers, [{"user-agent", "TeslaMate/#{@version}"}]},
+         {Tesla.Middleware.Headers, [{"user-agent", "TeslaMate/#{TeslaMate.Version.version()}"}]},
          Tesla.Middleware.JSON,
          {Tesla.Middleware.Logger, debug: true, level: &log_level/1}
 diff --git a/elixir/test/teslamate/http_test.exs b/elixir/test/teslamate/http_test.exs

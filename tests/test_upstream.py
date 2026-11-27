@@ -69,6 +69,11 @@ class PrepareUpstreamTests(unittest.TestCase):
         self.assertEqual((self.destination / "value").read_text(), "after\n")
         self.assertEqual(upstream.git(self.destination, "rev-parse", "HEAD"), self.pin["commit"])
 
+    def test_check_only_validates_exact_pin_without_checkout(self):
+        upstream.prepare(self.destination, self.pin_path, self.patches, check_only=True)
+        self.assertEqual(list(self.destination.iterdir()), [self.destination / ".git"])
+        self.assertEqual(upstream.git(self.destination, "rev-parse", "FETCH_HEAD"), self.pin["commit"])
+
     def test_unrelated_upstream_changes_and_missing_files_pass_through(self):
         files = {
             "LICENSE": b"Updated upstream license\r\n",
@@ -131,16 +136,22 @@ class PrepareUpstreamTests(unittest.TestCase):
 
     def test_patch_conflict_does_not_mutate_source(self):
         self.patch_file.write_text(self.patch_file.read_text().replace("-before", "-absent"))
-        with self.assertRaises(subprocess.CalledProcessError):
+        with self.assertRaisesRegex(upstream.PatchConflict, r"^001\.patch$"):
             self.prepare()
         self.assertEqual((self.destination / "value").read_text(), "before\n")
 
     def test_later_conflict_keeps_every_earlier_patch_unapplied(self):
         (self.patches / "002.patch").write_text(self.patch_file.read_text().replace("-before", "-missing"))
-        with self.assertRaises(subprocess.CalledProcessError):
+        with self.assertRaisesRegex(upstream.PatchConflict, r"^002\.patch$"):
             self.prepare()
         self.assertEqual((self.destination / "value").read_text(), "before\n")
         self.assertEqual(upstream.git(self.destination, "diff", "--name-only"), "")
+
+    def test_unreadable_patch_format_is_reported_as_git_error(self):
+        self.patch_file.write_text("not a patch\n")
+        with self.assertRaises(subprocess.CalledProcessError):
+            self.prepare()
+        self.assertEqual((self.destination / "value").read_text(), "before\n")
 
     def test_exact_patch_verification_rejects_other_source_changes(self):
         self.prepare()

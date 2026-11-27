@@ -1,11 +1,12 @@
 # Only mounted into the isolated compiled release and its new fixture database.
 import Ecto.Query
-alias TeslaMate.{Locations, Log, Repo}
+alias TeslaMate.{Locations, Log, Repo, Settings}
 alias TeslaMate.Locations.{Address, LocalIdentities}
 alias TeslaMate.Log.{ChargingProcess, Drive}
+alias TeslaMate.Settings.GlobalSettings
 
 {:ok, _} = LocalIdentities.initialize_fresh(apply: true, fresh_install: true)
-{1, nil} = Repo.update_all(TeslaMate.Settings.GlobalSettings, set: [language: "en"])
+{1, nil} = Repo.update_all(GlobalSettings, set: [language: "en"])
 point = %{latitude: Decimal.new("48.858400123"), longitude: Decimal.new("2.294500456")}
 {:ok, local} = Locations.find_address(point)
 true = local.osm_id < 0 and local.osm_type == "node"
@@ -54,8 +55,10 @@ charging =
 
 stored_position = Repo.get!(TeslaMate.Log.Position, position.id)
 
-for language <- ["zh-CN", "en"] do
-  :ok = Locations.refresh_addresses(language)
+for language <- ["zh", "en"] do
+  {:ok, %GlobalSettings{language: ^language}} =
+    Settings.update_global_settings(Settings.get_global_settings!(), %{language: language})
+
   updated = Repo.get!(Address, local.id)
   identity = [:id, :osm_id, :osm_type, :latitude, :longitude]
   true = Map.take(updated, identity) == Map.take(local, identity)
@@ -80,8 +83,12 @@ true = Repo.get!(TeslaMate.Log.Position, position.id) == stored_position
 snapshot = Repo.all(from(a in Address, order_by: a.id))
 2 = length(snapshot)
 
-for language <- ["missing", "shifted", "null-source", "wrong-source", "provider-fail"] do
-  {:error, _} = Locations.refresh_addresses(language)
+for language <- ["de", "es", "fr", "it", "nl"] do
+  {:error, reason} =
+    Settings.update_global_settings(Settings.get_global_settings!(), %{language: language})
+
+  true = is_atom(reason)
+  %GlobalSettings{language: "en"} = Settings.get_global_settings!()
   true = Repo.all(from(a in Address, order_by: a.id)) == snapshot
 end
 

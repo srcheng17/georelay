@@ -83,10 +83,10 @@ jobs:
         env:
           EXPECTED_MACHINE: ${{ matrix.machine }}
         run: test "$(uname -m)" = "$EXPECTED_MACHINE"
-      - name: Python checks
-        run: python3 -m unittest discover -s tests -v
       - name: Check fixed upstream and apply every patch
         run: python3 scripts/prepare_upstream.py "$RUNNER_TEMP/teslamate-upstream"
+      - name: Python checks
+        run: python3 -m unittest discover -s tests -v
       - name: Upstream contract tests in isolated containers
         run: bash scripts/test_upstream.sh "$RUNNER_TEMP/teslamate-upstream"
       - name: Build adapter and patched TeslaMate

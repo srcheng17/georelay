@@ -39,6 +39,8 @@ class GitHubFixture:
         self.main = MAIN
         self.recorded = True
         self.repairs = []
+        self.patch_checks = []
+        self.patch_error = None
 
     def detect(self, pin):
         responses = {
@@ -114,9 +116,15 @@ class GitHubFixture:
             return ""
         raise AssertionError(args)
 
+    def check_patches(self, proposed):
+        self.patch_checks.append(proposed)
+        if self.patch_error is not None:
+            raise self.patch_error
+
     def update(self):
         return updater.update_release(REPOSITORY, PIN, MAIN, api=self.api, run=self.run, detect=self.detect,
-                                      record_verify=lambda *args, **kwargs: None, repair_verify=lambda *args, **kwargs: None)
+                                      record_verify=lambda *args, **kwargs: None, repair_verify=lambda *args, **kwargs: None,
+                                      check_patches=self.check_patches)
 
     def dispatches(self):
         return [args for args in self.commands if args[:3] == ("gh", "workflow", "run")]
@@ -132,6 +140,7 @@ class UpdateReleaseTests(unittest.TestCase):
         self.assertEqual(report["status"], "current")
         self.assertEqual(fixture.calls, [])
         self.assertEqual(fixture.commands, [])
+        self.assertEqual(fixture.patch_checks, [])
 
     def test_new_release_creates_only_pin_commit_pr_and_explicit_dispatch(self):
         fixture = GitHubFixture()
@@ -140,6 +149,7 @@ class UpdateReleaseTests(unittest.TestCase):
         self.assertEqual(report["status"], "dispatched")
         self.assertEqual(report["source_main"], MAIN)
         self.assertEqual(PIN, original)
+        self.assertEqual(fixture.patch_checks, [PROPOSED])
         mutations = [(path, payload) for method, path, payload in fixture.calls if method == "POST"]
         self.assertEqual([path for path, _ in mutations], ["/git/blobs", "/git/trees", "/git/commits", "/git/refs", "/pulls"])
         self.assertEqual(json.loads(mutations[0][1]["content"]), PROPOSED)
@@ -162,6 +172,7 @@ class UpdateReleaseTests(unittest.TestCase):
                 self.assertEqual(fixture.update()["status"], "already_started")
                 self.assertFalse(any(method != "GET" for method, _, _ in fixture.calls))
                 self.assertEqual(fixture.dispatches(), [])
+                self.assertEqual(fixture.patch_checks, [PROPOSED])
 
     def test_record_failure_repairs_without_rebuilding_and_rechecks_without_observer(self):
         fixture = GitHubFixture()
@@ -186,6 +197,49 @@ class UpdateReleaseTests(unittest.TestCase):
         writes = [(path, payload) for method, path, payload in fixture.calls if method == "POST"]
         self.assertEqual(writes, [("/actions/workflows/beta-control.yml/dispatches", {"ref": "main", "inputs": {
             "original_run_id": "1", "original_attempt": "1", "repair_run_id": "9"}})])
+        self.assertEqual(fixture.dispatches(), [])
+        self.assertEqual(fixture.patch_checks, [PROPOSED])
+
+    def test_patch_conflict_reports_exact_candidate_and_blocks_automated_dispatch(self):
+        fixture = GitHubFixture()
+        fixture.patch_error = updater.PatchConflict("001.patch")
+        report = fixture.update()
+        self.assertEqual(report["status"], "blocked_patch_conflict")
+        self.assertEqual(report["patch"], "001.patch")
+        self.assertEqual(report["source_main"], MAIN)
+        self.assertEqual(report["source_commit"], BRANCH)
+        self.assertEqual(report["proposed"], PROPOSED)
+        self.assertEqual(report["pull_request"], fixture.pull["html_url"])
+        self.assertEqual(fixture.dispatches(), [])
+
+        fixture.calls.clear()
+        fixture.runs = [{"databaseId": 1, "headSha": BRANCH, "status": "completed", "conclusion": "failure"}]
+        fixture.published = False
+        self.assertEqual(fixture.update(), report)
+        self.assertFalse(any(method != "GET" for method, _, _ in fixture.calls))
+        self.assertEqual(fixture.dispatches(), [])
+
+    def test_preflight_transport_failure_allows_retry(self):
+        fixture = GitHubFixture()
+        fixture.patch_error = subprocess.CalledProcessError(128, ["git", "fetch"])
+        with self.assertRaises(subprocess.CalledProcessError):
+            fixture.update()
+        self.assertEqual(fixture.dispatches(), [])
+        fixture.patch_error = None
+        self.assertEqual(fixture.update()["status"], "dispatched")
+        self.assertEqual(len(fixture.dispatches()), 1)
+
+    def test_main_movement_during_preflight_blocks_dispatch(self):
+        fixture = GitHubFixture()
+
+        def moved(pin):
+            fixture.patch_checks.append(pin)
+            fixture.main = "9" * 40
+
+        fixture.check_patches = moved
+        with self.assertRaisesRegex(updater.UpdateError, "Source or release changed"):
+            fixture.update()
+        self.assertEqual(fixture.patch_checks, [PROPOSED])
         self.assertEqual(fixture.dispatches(), [])
 
     def test_moved_tag_branch_mismatch_main_drift_and_extra_files_stop(self):

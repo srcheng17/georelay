@@ -41,11 +41,13 @@ MAINLAND_PROVINCES = frozenset("北京市 天津市 河北省 山西省 内蒙�
 SPECIAL_REGIONS = frozenset({"香港特别行政区", "澳门特别行政区", "台湾省", "香港", "澳门", "台湾"})
 CHINA_NAMES = frozenset({"中国", "中华人民共和国", "china"})
 MAX_BODY = 1024 * 1024
-MAX_IDS = 50  # TeslaMate Locations.update_addresses/1 batches 50 identities.
+MAX_IDS = 50  # TeslaMate batches localization requests in groups of 50.
 MAX_ID = 2**63 - 1
 MAX_REQUEST_BODY = 65536
 CACHE_CLEANUP_INTERVAL = 60
 CACHE_CLEANUP_LIMIT = 500
+RELINK_ENDPOINT = "/v1/osm-source/relink"
+APPLICATION_ENDPOINTS = {"/v1/reverse", "/v1/lookup", RELINK_ENDPOINT}
 
 
 class AdapterError(Exception):
@@ -210,21 +212,20 @@ def osm_identity(payload):
     return payload["osm_type"], payload["osm_id"]
 
 
-def osm_address(payload, identity, lat, lon):
+def osm_address(payload):
     payload = mapping(payload)
     address = {key: text(value) for key, value in mapping(payload.get("address")).items() if text(value)}
     if "error" in payload or text(payload.get("display_name")) in {"", "Unable to geocode"} or not address:
         raise AdapterError(502, "Invalid upstream response")
-    osm_identity(payload)
+    source_type, source_id = osm_identity(payload)
     # Upstream identities are provenance only; PostgreSQL owns stable identity.
     return {
-        "osm_id": -identity, "osm_type": "node", "lat": lat, "lon": lon,
         "display_name": payload["display_name"],
         "name": text(payload.get("name")) or text(mapping(payload.get("namedetails")).get("name")),
         "address": address,
         "namedetails": {key: text(value) for key, value in mapping(payload.get("namedetails")).items() if text(value)},
         "licence": "Data © OpenStreetMap contributors, ODbL 1.0. https://osm.org/copyright",
-        "upstream": {"provider": "osm", "osm_id": payload.get("osm_id"), "osm_type": payload.get("osm_type")},
+        "upstream": {"provider": "osm", "osm_id": source_id, "osm_type": source_type},
     }
 
 
@@ -346,9 +347,10 @@ def request_address(value, allow_positive=False):
 
 
 def request_document(value, endpoint):
-    field = "address" if endpoint == "/v1/reverse" else "addresses"
-    if (not isinstance(value, dict) or set(value) - {"version", field, "language", "provider"}
-            or not {"version", field, "language"} <= set(value)):
+    field = "addresses" if endpoint == "/v1/lookup" else "address"
+    required = {"version", field, "language"}
+    allowed = required if endpoint == RELINK_ENDPOINT else required | {"provider"}
+    if not isinstance(value, dict) or set(value) - allowed or not required <= set(value):
         raise AdapterError(400, "Invalid protocol request")
     if type(value["version"]) is not int or value["version"] != 1:
         raise AdapterError(400, "Unsupported protocol version")
@@ -516,26 +518,53 @@ class Adapter:
                 stale.setdefault(source, []).append(row)
         if not stale:
             return
-        ids = ",".join(kind[0].upper() + str(identity) for kind, identity in stale)
-        payload = self.osm("", "", language, deadline, ids)
-        if not isinstance(payload, list) or len(payload) != len(stale):
-            raise AdapterError(502, "Invalid upstream response")
-        found = {}
-        for item in payload:
-            source = osm_identity(item)
-            if source not in stale or source in found:
-                raise AdapterError(502, "Unexpected upstream identity")
-            if policy != "osm":
-                require_outside_mainland(item, AdapterError(502, "Unexpected upstream coverage"))
-            found[source] = item
-        # Validate the entire upstream set before storing any batch result.
-        bodies = [(row, self.template(osm_address(found[source], 0, row["lat"], row["lon"]), row, policy))
+        found = self.lookup_osm_sources(stale, language, deadline, outside=policy != "osm")
+        if len(found) != len(stale):
+            raise AdapterError(502, "stale_osm_source")
+        bodies = [(row, self.template(found[source], row, policy))
                   for source, local_rows in stale.items() for row in local_rows]
         remaining(deadline)
         with self.connect(deadline) as db:
             for row, body in bodies:
                 self.cache_result(db, row, body, language, policy)
             remaining(deadline)
+
+    def lookup_osm_sources(self, sources, language, deadline, outside=False):
+        ids = ",".join(kind[0].upper() + str(identity) for kind, identity in sources)
+        payload = self.osm("", "", language, deadline, ids)
+        if not isinstance(payload, list):
+            raise AdapterError(502, "Invalid upstream response")
+        found = {}
+        for item in payload:
+            body = osm_address(item)
+            source = body["upstream"]["osm_type"], body["upstream"]["osm_id"]
+            if source not in sources or source in found:
+                raise AdapterError(502, "Unexpected upstream identity")
+            if outside:
+                require_outside_mainland(item, AdapterError(502, "Unexpected upstream coverage"))
+            found[source] = body
+        remaining(deadline)
+        return found
+
+    def relink_osm_source(self, address, language=""):
+        row = request_address(address)
+        context, language = row["context"], language_value(language)
+        policy = self.policy(None)
+        outside = context["outside_mainland"]
+        if "source_osm_id" not in context or not (policy == "osm" or (policy.startswith("auto:") and outside)):
+            raise AdapterError(422, "OSM source relink requires a stored source and active OSM routing")
+        old = context["source_osm_type"], context["source_osm_id"]
+        deadline = time.monotonic() + self.lookup_timeout
+        if self.lookup_osm_sources({old}, language, deadline):
+            raise AdapterError(409, "osm_source_not_stale")
+        payload = self.osm(row["lat"], row["lon"], language, deadline)
+        if osm_identity(payload) == old:
+            raise AdapterError(502, "Unexpected upstream identity")
+        if outside:
+            require_outside_mainland(payload, AdapterError(502, "Unexpected upstream coverage"))
+        body = osm_address(payload)
+        remaining(deadline)
+        return self.response(self.template(body, row, policy), row)
 
     def keyed_payload(self, provider, lat, lon, language, deadline):
         timeout = min(self.timeout, remaining(deadline))
@@ -566,10 +595,14 @@ class Adapter:
     def address(self, row, language, deadline, policy):
         lat, lon, outside = row["lat"], row["lon"], row["context"]["outside_mainland"]
         cache_key = self.cache_key(row, language, policy)
+        shared_key = self.cache_key(row, None, policy) if policy != "osm" else cache_key
         with self.connect(deadline) as db:
-            cached = db.execute("SELECT expires,body FROM cache WHERE cache_key=?", (cache_key,)).fetchone()
+            cached = db.execute(
+                "SELECT cache_key,body FROM cache WHERE cache_key IN (?,?) AND expires>? "
+                "ORDER BY cache_key=? DESC LIMIT 1", (cache_key, shared_key, time.time(), cache_key),
+            ).fetchone()
         remaining(deadline)
-        if cached and cached[0] > time.time():
+        if cached:
             try:
                 template = json.loads(cached[1])
                 if (not isinstance(template, dict) or any(key in template for key in ("osm_id", "osm_type", "lat", "lon"))
@@ -583,12 +616,17 @@ class Adapter:
                 request_address({**row, "context": cached_context})
                 if row["context"]["outside_mainland"] and not cached_context["outside_mainland"]:
                     raise ValueError
+                if cached[0] != cache_key:
+                    expected_provider = policy.removeprefix("auto:").removesuffix(":global")
+                    if (mapping(template.get("upstream")).get("provider") != expected_provider
+                            or cached_context != row["context"]):
+                        raise ValueError
             except (AdapterError, ValueError, TypeError):
                 raise AdapterError(503, "Invalid cache data") from None
             return self.response(template, row)
         if policy == "osm":
             payload = self.osm(lat, lon, language, deadline)
-            body = osm_address(payload, 0, lat, lon)
+            body = osm_address(payload)
         elif not policy.startswith("auto:"):
             provider = policy.split(":")[0]
             payload = self.keyed_payload(provider, lat, lon, language, deadline)
@@ -609,7 +647,7 @@ class Adapter:
             if body is None:
                 payload = self.osm(lat, lon, language, deadline)
                 require_outside_mainland(payload, error)
-                body = osm_address(payload, 0, lat, lon)
+                body = osm_address(payload)
         remaining(deadline)
         body = self.template(body, row, policy)
         with self.connect(deadline) as db:
@@ -619,8 +657,13 @@ class Adapter:
         return self.response(body, row)
 
     def cache_result(self, db, row, body, language, policy):
+        # Keyed providers use their default language. Reuse only resolved
+        # keyed results; auto can still resolve other contexts to localized OSM.
+        if body["upstream"]["provider"] in {"amap", "baidu"}:
+            language = None
         db.execute("INSERT OR REPLACE INTO cache VALUES(?,?,?,?,?)", (
-            self.cache_key(row, language, policy), language, policy, time.time() + self.ttl, json.dumps(body, ensure_ascii=False),
+            self.cache_key(row, language, policy), language or "", policy,
+            time.time() + self.ttl, json.dumps(body, ensure_ascii=False),
         ))
 
     def osm(self, lat, lon, language, deadline, osm_ids=None):
@@ -698,15 +741,13 @@ class Handler(BaseHTTPRequestHandler):
         try:
             endpoint = self.target()
             if not post:
-                if endpoint in {"/reverse", "/lookup", "/v1/reverse", "/v1/lookup"}:
+                if endpoint in APPLICATION_ENDPOINTS:
                     raise AdapterError(409, "Application-owned protocol required")
                 if endpoint != "/health":
                     raise AdapterError(404, "Endpoint not found")
                 body = self.server.adapter.health()
             else:
-                if endpoint in {"/reverse", "/lookup"}:
-                    raise AdapterError(409, "Application-owned protocol required")
-                if endpoint not in {"/v1/reverse", "/v1/lookup"}:
+                if endpoint not in APPLICATION_ENDPOINTS:
                     raise AdapterError(404, "Endpoint not found")
                 if self.headers.get("Transfer-Encoding") is not None:
                     raise AdapterError(400, "Unsupported request encoding")
@@ -730,8 +771,11 @@ class Handler(BaseHTTPRequestHandler):
                 except (UnicodeError, ValueError, RecursionError):
                     raise AdapterError(400, "Invalid JSON request") from None
                 value, language, provider = request_document(document, endpoint)
-                function = self.server.adapter.reverse if endpoint == "/v1/reverse" else self.server.adapter.lookup
-                body = function(value, language, provider)
+                if endpoint == RELINK_ENDPOINT:
+                    body = self.server.adapter.relink_osm_source(value, language)
+                else:
+                    function = self.server.adapter.reverse if endpoint == "/v1/reverse" else self.server.adapter.lookup
+                    body = function(value, language, provider)
             self.respond(200, body)
         except AdapterError as exc:
             self.respond(exc.status, {"error": str(exc)})
